@@ -1,0 +1,15 @@
+dn: {{ ldap_database_config_dn }}
+changetype: modify
+{% if ldap_current_suffix != ldap_base_dn %}
+replace: olcSuffix
+olcSuffix: {{ ldap_base_dn }}
+-
+{% endif %}
+{% if ldap_current_rootdn != ldap_admin_dn %}
+replace: olcRootDN
+olcRootDN: {{ ldap_admin_dn }}
+-
+{% endif %}
+replace: olcRootPW
+olcRootPW: {{ ldap_admin_password_hash }}
+

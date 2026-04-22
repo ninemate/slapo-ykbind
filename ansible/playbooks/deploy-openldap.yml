@@ -1,0 +1,9 @@
+---
+- name: Deploy OpenLDAP container with ykbind overlay
+  hosts: openldap
+  become: true
+  vars:
+    repo_root: "{{ playbook_dir | dirname | dirname }}"
+  roles:
+    - openldap_docker
+

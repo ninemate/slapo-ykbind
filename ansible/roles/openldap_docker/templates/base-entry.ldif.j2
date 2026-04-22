@@ -1,0 +1,13 @@
+{%- set base_rdn = ldap_base_dn.split(',')[0] -%}
+{%- set base_attr = base_rdn.split('=')[0] -%}
+{%- set base_value = base_rdn.split('=', 1)[1] -%}
+dn: {{ ldap_base_dn }}
+{% for object_class in ldap_base_object_classes %}
+objectClass: {{ object_class }}
+{% endfor %}
+{{ base_attr }}: {{ base_value }}
+{% for attr_name, attr_value in ldap_base_additional_attributes.items() %}
+{% if attr_name != base_attr %}
+{{ attr_name }}: {{ attr_value }}
+{% endif %}
+{% endfor %}

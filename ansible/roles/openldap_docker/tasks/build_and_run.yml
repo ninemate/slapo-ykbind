@@ -1,0 +1,31 @@
+---
+- name: Verify docker compose plugin is available
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - version
+  register: ldap_docker_compose_version
+  changed_when: false
+
+- name: Build image and start OpenLDAP container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ ldap_compose_file }}"
+      - up
+      - -d
+      - --build
+      - --remove-orphans
+    chdir: "{{ ldap_deploy_root }}"
+  register: ldap_compose_up
+  changed_when: "'is up to date' not in (ldap_compose_up.stdout ~ ldap_compose_up.stderr)"
+
+- name: Wait for LDAP TCP listener on target host
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ ldap_listen_port }}"
+    timeout: 90
+

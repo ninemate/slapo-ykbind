@@ -1,0 +1,380 @@
+---
+- name: Wait until ldapi is ready inside the container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapwhoami
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+  register: ldap_ldapi_ready
+  retries: 30
+  delay: 2
+  until: ldap_ldapi_ready.rc == 0
+  changed_when: false
+
+- name: Discover the primary LDAP database entry
+  ansible.builtin.shell: >
+    docker exec {{ ldap_container_name }} sh -lc
+    "ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config
+    '(&(objectClass=olcDatabaseConfig)(!(olcDatabase=config))(!(olcDatabase=frontend))(olcSuffix=*))'
+    dn olcSuffix olcRootDN |
+    awk '
+      /^dn: / { sub(/^dn: /, \"\", \$0); dn=\$0 }
+      /^olcSuffix: / { sub(/^olcSuffix: /, \"\", \$0); suffix=\$0 }
+      /^olcRootDN: / { sub(/^olcRootDN: /, \"\", \$0); rootdn=\$0 }
+      END { if (dn != \"\") { printf \"%s|%s|%s\\n\", dn, suffix, rootdn } }
+    '"
+  register: ldap_db_lookup
+  changed_when: false
+
+- name: Fail if no LDAP database entry was found
+  ansible.builtin.fail:
+    msg: "Nem sikerült azonosítani az OpenLDAP backend adatbázist a cn=config alatt."
+  when: ldap_db_lookup.stdout | trim == ""
+
+- name: Store current database metadata
+  ansible.builtin.set_fact:
+    ldap_database_config_dn: "{{ (ldap_db_lookup.stdout.split('|'))[0] }}"
+    ldap_current_suffix: "{{ (ldap_db_lookup.stdout.split('|'))[1] }}"
+    ldap_current_rootdn: "{{ (ldap_db_lookup.stdout.split('|'))[2] }}"
+
+- name: Hash admin password for optional rootDN reset
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - slappasswd
+      - -s
+      - "{{ ldap_admin_password }}"
+  register: ldap_admin_password_hash_cmd
+  changed_when: false
+  when:
+    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+
+- name: Render database config update LDIF
+  ansible.builtin.template:
+    src: database-config.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/database-config.ldif"
+    mode: "0644"
+  vars:
+    ldap_admin_password_hash: "{{ ldap_admin_password_hash_cmd.stdout }}"
+  when:
+    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+
+- name: Update LDAP suffix, rootDN and rootPW when requested
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/database-config.ldif"
+  when:
+    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+
+- name: Check whether the base DN already exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+      - -LLL
+      - -b
+      - "{{ ldap_base_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - dn
+  register: ldap_base_entry_check
+  changed_when: false
+  failed_when: false
+
+- name: Create base DN entry when missing
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/base-entry.ldif"
+  when: "ldap_base_entry_check.rc != 0 or 'dn: ' not in ldap_base_entry_check.stdout"
+
+- name: Check required OU entries
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+      - -LLL
+      - -b
+      - "ou={{ item }},{{ ldap_base_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - dn
+  loop: "{{ ldap_base_ous }}"
+  register: ldap_ou_checks
+  changed_when: false
+  failed_when: false
+
+- name: Create missing OU entries
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/ou-{{ item.item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+  loop: "{{ ldap_ou_checks.results }}"
+  when: "item.rc != 0 or 'dn: ' not in item.stdout"
+
+- name: Check whether bundled YubiKey schema is already loaded
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - cn=schema,cn=config
+      - "(cn={{ ldap_container_schema_name }})"
+      - dn
+  register: ldap_yubikey_schema_check
+  changed_when: false
+
+- name: Import bundled YubiKey schema into cn=config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/schema/yubikey-otp.ldif"
+  when: "'dn: ' not in ldap_yubikey_schema_check.stdout"
+
+- name: Check optional extra schema LDIF files
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - cn=schema,cn=config
+      - "(cn={{ item | basename | regex_replace('\\.ldif$', '') }})"
+      - dn
+  loop: "{{ ldap_additional_schema_ldifs }}"
+  register: ldap_extra_schema_checks
+  changed_when: false
+  when: ldap_additional_schema_ldifs | length > 0
+
+- name: Import missing extra schema LDIF files
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/schema/{{ item.item | basename }}"
+  loop: "{{ ldap_extra_schema_checks.results | default([]) }}"
+  when: "'dn: ' not in item.stdout"
+
+- name: Check whether ykbind module is already loaded
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - cn=module{0},cn=config
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcModuleLoad
+  register: ldap_module_check
+  changed_when: false
+  when: ldap_module_build_enabled
+
+- name: Load ykbind module in cn=config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/module-load.ldif"
+  when: ldap_module_build_enabled and ldap_container_module_name not in (ldap_module_check.stdout | default(''))
+
+- name: Check whether ykbind overlay is already configured
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - "{{ ldap_database_config_dn }}"
+      - "(olcOverlay=ykbind)"
+      - dn
+  register: ldap_overlay_check
+  changed_when: false
+  when: ldap_module_build_enabled
+
+- name: Configure ykbind overlay on the main database
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/overlay-config.ldif"
+  when: "ldap_module_build_enabled and 'dn: ' not in (ldap_overlay_check.stdout | default(''))"
+
+- name: Check that TLS files exist on the target host
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ ldap_tls_host_dir }}/tls.crt"
+    - "{{ ldap_tls_host_dir }}/tls.key"
+    - "{{ ldap_tls_host_dir }}/ca.crt"
+  register: ldap_tls_file_stats
+  when: ldap_enable_ldaps
+
+- name: Fail when LDAPS is enabled but TLS files are missing
+  ansible.builtin.fail:
+    msg: "LDAPS engedélyezve van, de hiányzik legalább egy fájl a {{ ldap_tls_host_dir }} könyvtárból."
+  when: ldap_enable_ldaps and (ldap_tls_file_stats.results | default([]) | selectattr('stat.exists', 'equalto', false) | list | length > 0)
+
+- name: Read current TLS configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - cn=config
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcTLSCACertificateFile
+      - olcTLSCertificateFile
+      - olcTLSCertificateKeyFile
+  register: ldap_tls_config_check
+  changed_when: false
+  when: ldap_enable_ldaps
+
+- name: Configure TLS paths in cn=config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/tls-config.ldif"
+  when: ldap_enable_ldaps and (ldap_tls_cert_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_key_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_ca_file not in (ldap_tls_config_check.stdout | default('')))

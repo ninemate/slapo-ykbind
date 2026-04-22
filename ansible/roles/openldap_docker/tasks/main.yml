@@ -1,0 +1,22 @@
+---
+- name: Install host prerequisites
+  ansible.builtin.import_tasks: prerequisites.yml
+
+- name: Create deploy directories
+  ansible.builtin.import_tasks: directories.yml
+
+- name: Render Docker and LDIF assets
+  ansible.builtin.import_tasks: render.yml
+
+- name: Build image and start container
+  ansible.builtin.import_tasks: build_and_run.yml
+
+- name: Configure LDAP server
+  ansible.builtin.import_tasks: configure.yml
+
+- name: Run optional LDIF imports
+  ansible.builtin.import_tasks: import.yml
+
+- name: Run smoke tests
+  ansible.builtin.import_tasks: verify.yml
+

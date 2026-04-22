@@ -1,0 +1,94 @@
+---
+- name: Copy Docker build assets to target host
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - src: "{{ repo_root }}/docker/openldap/Dockerfile"
+      dest: "{{ ldap_build_context_dir }}/Dockerfile"
+    - src: "{{ repo_root }}/docker/openldap/entrypoint.sh"
+      dest: "{{ ldap_build_context_dir }}/entrypoint.sh"
+      mode: "0755"
+    - src: "{{ role_path }}/files/noCheckValidUntil"
+      dest: "{{ ldap_build_context_dir }}/noCheckValidUntil"
+    - src: "{{ role_path }}/files/syslog-ng.conf"
+      dest: "{{ ldap_build_context_dir }}/syslog-ng.conf"
+    - src: "{{ role_path }}/files/healthcheck.sh"
+      dest: "{{ ldap_build_context_dir }}/healthcheck.sh"
+      mode: "0755"
+
+- name: Copy overlay module source files to build context
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - src: "{{ repo_root }}/Makefile"
+      dest: "{{ ldap_build_context_dir }}/module/Makefile"
+    - src: "{{ repo_root }}/slapo-ykbind.c"
+      dest: "{{ ldap_build_context_dir }}/module/slapo-ykbind.c"
+    - src: "{{ repo_root }}/patches/openldap-2.6.10-sasl-getconfpath-guard.patch"
+      dest: "{{ ldap_build_context_dir }}/module/patches/openldap-2.6.10-sasl-getconfpath-guard.patch"
+
+- name: Copy bundled schema LDIF to runtime directory
+  ansible.builtin.copy:
+    src: "{{ repo_root }}/schema/yubikey-otp.ldif"
+    dest: "{{ ldap_runtime_schema_dir }}/yubikey-otp.ldif"
+    mode: "0644"
+
+- name: Copy optional TLS material to target host
+  ansible.builtin.copy:
+    src: "{{ item.src if item.src.startswith('/') else repo_root ~ '/' ~ item.src }}"
+    dest: "{{ ldap_tls_host_dir }}/{{ item.dest }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - src: "{{ ldap_tls_certificate_src }}"
+      dest: tls.crt
+      mode: "0644"
+    - src: "{{ ldap_tls_private_key_src }}"
+      dest: tls.key
+      mode: "0600"
+    - src: "{{ ldap_tls_ca_src }}"
+      dest: ca.crt
+      mode: "0644"
+  when:
+    - ldap_enable_ldaps
+    - item.src | length > 0
+
+- name: Copy additional schema LDIFs to target host
+  ansible.builtin.copy:
+    src: "{{ item if item.startswith('/') else repo_root ~ '/' ~ item }}"
+    dest: "{{ ldap_runtime_schema_dir }}/{{ item | basename }}"
+    mode: "0644"
+  loop: "{{ ldap_additional_schema_ldifs }}"
+  when: ldap_additional_schema_ldifs | length > 0
+
+- name: Render Docker Compose manifest
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ ldap_compose_file }}"
+    mode: "0644"
+
+- name: Render LDAP configuration LDIF assets
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ ldap_runtime_ldif_dir }}/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - src: base-entry.ldif.j2
+      dest: base-entry.ldif
+    - src: module-load.ldif.j2
+      dest: module-load.ldif
+    - src: overlay-config.ldif.j2
+      dest: overlay-config.ldif
+    - src: tls-config.ldif.j2
+      dest: tls-config.ldif
+
+- name: Render OU LDIF files
+  ansible.builtin.template:
+    src: ou-entry.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/ou-{{ item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+    mode: "0644"
+  loop: "{{ ldap_base_ous }}"
+

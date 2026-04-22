@@ -1,0 +1,47 @@
+services:
+  openldap:
+    container_name: {{ ldap_container_name }}
+    image: {{ ldap_image_name }}
+    build:
+      context: {{ ldap_build_context_dir }}
+      dockerfile: Dockerfile
+      args:
+        http_proxy: {{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) | quote }}
+        https_proxy: {{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) | quote }}
+        no_proxy: {{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) | quote }}
+        LDAP_MODULE_BUILD_ENABLED: {{ (ldap_module_build_enabled | bool) | ternary('true', 'false') | quote }}
+    environment:
+      LDAP_BASE_DN: {{ ldap_base_dn | quote }}
+      LDAP_DOMAIN: {{ ldap_domain | quote }}
+      LDAP_ORGANIZATION: {{ ldap_organization | quote }}
+      LDAP_ADMIN_DN: {{ ldap_admin_dn | quote }}
+      LDAP_ADMIN_PASSWORD: {{ ldap_admin_password | quote }}
+      LDAP_ENABLE_LDAPS: {{ (ldap_enable_ldaps | bool) | ternary('true', 'false') | quote }}
+      LDAP_TLS_CERT_FILE: {{ ldap_tls_cert_file | quote }}
+      LDAP_TLS_KEY_FILE: {{ ldap_tls_key_file | quote }}
+      LDAP_TLS_CA_FILE: {{ ldap_tls_ca_file | quote }}
+      http_proxy: {{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) | quote }}
+      https_proxy: {{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) | quote }}
+      no_proxy: {{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) | quote }}
+    hostname: {{ ldap_container_name }}
+    restart: unless-stopped
+    ports:
+{% if ldap_ports | length > 0 %}
+{%   for port_mapping in ldap_ports %}
+      - {{ port_mapping | quote }}
+{%   endfor %}
+{% else %}
+      - "{{ ldap_listen_port }}:389"
+{%   if ldap_enable_ldaps %}
+      - "{{ ldap_ldaps_port }}:636"
+{%   endif %}
+{% endif %}
+    volumes:
+      - "{{ ldap_data_dir }}:/var/lib/ldap"
+      - "{{ ldap_config_dir }}:/etc/ldap/slapd.d"
+      - "{{ ldap_log_dir }}:/var/log/slapd"
+      - "{{ ldap_runtime_ldif_dir }}:{{ ldap_container_bootstrap_dir }}/ldif:ro"
+      - "{{ ldap_runtime_schema_dir }}:{{ ldap_container_bootstrap_dir }}/schema:ro"
+{% if ldap_enable_ldaps %}
+      - "{{ ldap_tls_host_dir }}:{{ ldap_container_tls_dir }}:ro"
+{% endif %}

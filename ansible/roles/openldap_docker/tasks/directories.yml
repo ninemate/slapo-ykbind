@@ -1,0 +1,20 @@
+---
+- name: Create deploy directories on target host
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ldap_deploy_root }}"
+    - "{{ ldap_build_context_dir }}"
+    - "{{ ldap_build_context_dir }}/module"
+    - "{{ ldap_build_context_dir }}/module/patches"
+    - "{{ ldap_runtime_dir }}"
+    - "{{ ldap_runtime_ldif_dir }}"
+    - "{{ ldap_runtime_schema_dir }}"
+    - "{{ ldap_runtime_import_dir }}"
+    - "{{ ldap_tls_host_dir }}"
+    - "{{ ldap_data_dir }}"
+    - "{{ ldap_config_dir }}"
+    - "{{ ldap_log_dir }}"
+

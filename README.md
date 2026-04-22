@@ -1,28 +1,391 @@
-# OpenLDAP YubiKey OTP overlay Debianhoz
+# OpenLDAP YubiKey OTP Overlay Ansible Deploy
 
-Ez a repository a meglévő 389 DS plugin logikájából kiindulva egy **OpenLDAP overlay** modult ad, amely egyszerű bind esetén a beküldött credentialt:
+Ez a repository két dolgot ad egyben:
 
-`<password><otp>`
+1. egy saját `ykbind` OpenLDAP overlay modult YubiKey OTP ellenőrzéssel
+2. egy teljes, Ansible-alapú, Dockeres deploy megoldást Debian 12 alapú OpenLDAP szerverhez
 
-alakban várja, a végéről levágja a 44 karakteres YubiKey OTP-t, azt helyben validálja, majd a maradék statikus jelszót átadja a slapd normál jelszóellenőrzésének.
+A cél a "one click" deploy: egyetlen playbook futtatása hozza létre a build contextet, buildeli az image-et, elindítja a konténert, betölti a schema/modul/overlay konfigurációt, felépíti az LDAP tree alapját, opcionálisan importál LDIF-et, majd smoke teszteket futtat.
 
-## Auth flow
+## Mit csinál a playbook
 
-1. A kliens simple bindot küld a teljes `<password><otp>` credentiallel.
-2. Az overlay a bind DN entryjét kiolvassa.
-3. Ha a userhez YubiKey van rendelve, az overlay:
-   - leválasztja az OTP-t,
-   - dekódolja az AES ticketet,
-   - ellenőrzi a private UID-t,
-   - ellenőrzi a CRC-t,
-   - ellenőrzi a replay állapotot.
-4. Ha ez sikeres, az overlay a bind credentialt lecseréli a statikus jelszóra.
-5. Az alatta lévő OpenLDAP backend a meglévő `userPassword` alapján autentikál.
-6. Sikeres bind után az overlay belső modify-val frissíti a YubiKey replay mezőket.
+Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansible/playbooks/deploy-openldap.yml) futtatása:
 
-## Adatmodell
+- létrehozza a target hoston a deploy könyvtárakat
+- kirakja a Docker build contextet
+- Debian 12 alapú image-et buildel a [docker/openldap/Dockerfile](/home/username/Documents/yubik/docker/openldap/Dockerfile) alapján
+- a meglévő `slapo-ykbind.c` modult multi-stage buildben lefordítja
+- elindítja a konténert Docker Compose-szal
+- inicializálja a slapd adatbázist az [docker/openldap/entrypoint.sh](/home/username/Documents/yubik/docker/openldap/entrypoint.sh) segítségével
+- betölti a `yubikey-otp` schema-t
+- betölti a `ykbind.so` modult és hozzáadja az overlayt a fő adatbázishoz
+- létrehozza a base DN-t és a szükséges OU-kat
+- opcionálisan bootstrap LDIF-et és teljes tree exportot importál
+- lefuttatja az admin bind és base query smoke teszteket
 
-Az új schema elsődleges mezői:
+## Repository felépítés
+
+- [ansible/](/home/username/Documents/yubik/ansible): inventory, playbook, role, defaults, vars, templates, files
+- [docker/openldap/](/home/username/Documents/yubik/docker/openldap): a konténerhez használt `Dockerfile` és `entrypoint.sh`
+- [schema/](/home/username/Documents/yubik/schema): a saját schema LDIF és schema forrás
+- [examples/](/home/username/Documents/yubik/examples): kézi LDAP példák és korábbi LDIF minták
+- [slapo-ykbind.c](/home/username/Documents/yubik/slapo-ykbind.c): a saját overlay forrása
+- [Makefile](/home/username/Documents/yubik/Makefile): a modul build logikája
+
+## Előfeltételek
+
+Control node:
+
+- Ansible telepítve
+- SSH elérés a target hostra
+- jog a target hoston `become` használatára
+
+Target host:
+
+- Debian-alapú rendszer ajánlott
+- internet vagy működő APT proxy
+- Docker Engine és Docker Compose plugin
+
+Alapértelmezésben a role felteszi a következő host csomagokat Debianon:
+
+- `docker.io`
+- `docker-compose-plugin`
+
+Ha ezt nem szeretnéd, állítsd `false`-ra a `ldap_manage_host_packages` változót.
+
+## Inventory kitöltése
+
+Minta inventory:
+
+```ini
+[openldap]
+localhost ansible_connection=local
+
+[openldap:vars]
+ansible_become=true
+```
+
+Távoli host például:
+
+```ini
+[openldap]
+ldap-host ansible_host=ldap-host.example.net ansible_user=debian
+
+[openldap:vars]
+ansible_become=true
+```
+
+Az alap inventory itt van:
+
+- [ansible/inventory/hosts.ini](/home/username/Documents/yubik/ansible/inventory/hosts.ini)
+
+## Fontos változók
+
+Az alapértelmezések itt vannak:
+
+- [ansible/roles/openldap_docker/defaults/main.yml](/home/username/Documents/yubik/ansible/roles/openldap_docker/defaults/main.yml)
+
+Legalább ezeket érdemes átnézni:
+
+```yaml
+ldap_base_dn: dc=example,dc=org
+ldap_domain: example.org
+ldap_organization: Example Organization
+ldap_admin_dn: cn=admin,dc=example,dc=org
+ldap_admin_password: changeme
+
+ldap_container_name: openldap-ykbind
+ldap_image_name: openldap-ykbind:latest
+
+ldap_http_proxy: http://proxy.example.net:3128
+ldap_https_proxy: http://proxy.example.net:3128
+ldap_no_proxy: localhost,127.0.0.1
+
+ldap_listen_port: 389
+ldap_ldaps_port: 636
+ldap_enable_ldaps: false
+
+ldap_ldif_import_enabled: false
+ldap_ldif_import_file: ""
+ldap_bootstrap_ldif_file: ""
+
+ldap_module_build_enabled: true
+
+ldap_data_dir: /opt/openldap-ykbind/data
+ldap_config_dir: /opt/openldap-ykbind/config
+ldap_log_dir: /opt/openldap-ykbind/logs
+```
+
+További fontos, deploy közben gyakran használt változók:
+
+- `ldap_base_ous`
+- `ldap_ports`
+- `ldap_force_password_reset`
+- `ldap_force_full_import`
+- `ldap_tls_certificate_src`
+- `ldap_tls_private_key_src`
+- `ldap_tls_ca_src`
+- `ldap_smoke_test_user_dn`
+
+Felülírási lehetőségek:
+
+- `ansible/group_vars/all.yml`
+- `ansible/host_vars/<host>.yml`
+- `ansible-playbook -e key=value`
+
+## One-click deploy futtatás
+
+Lokális inventoryval:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml
+```
+
+Példa saját alap DN-nel és admin jelszóval:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_domain=example.org \
+  -e ldap_base_dn=dc=example,dc=org \
+  -e ldap_organization="Example Org" \
+  -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
+  -e ldap_admin_password='<set-admin-password>'
+```
+
+Példa távoli hostra:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml
+```
+
+## A deploy által létrehozott target oldali könyvtárak
+
+Alapértelmezett root:
+
+```text
+/opt/openldap-ykbind
+```
+
+Fontos alkönyvtárak:
+
+- `build/`: Docker build context
+- `runtime/ldif/`: generált LDIF-ek
+- `runtime/schema/`: schema LDIF-ek
+- `runtime/tls/`: opcionális TLS fájlok
+- `data/`: LDAP adat perzisztencia
+- `config/`: `cn=config` perzisztencia
+- `logs/`: log perzisztencia
+
+## Full tree export meglévő LDAP-ból
+
+Ez a rész a teljes adatfára vonatkozik, nem a `cn=config` exportjára.
+
+Példa export parancs meglévő LDAP szerverről:
+
+```bash
+ldapsearch -x -LLL -o ldif-wrap=no \
+  -D "cn=admin,dc=example,dc=org" \
+  -W \
+  -H ldap://OLD-LDAP-HOST:389 \
+  -b "dc=example,dc=org" \
+  "(objectClass=*)" > /home/username/Documents/yubik/exports/full-tree.ldif
+```
+
+Ha bootstrap LDIF-et is akarsz használni, például külön OU-khoz vagy service entrykhez:
+
+```bash
+ldapsearch -x -LLL -o ldif-wrap=no \
+  -D "cn=admin,dc=example,dc=org" \
+  -W \
+  -H ldap://OLD-LDAP-HOST:389 \
+  -b "ou=People,dc=example,dc=org" \
+  "(objectClass=*)" > /home/username/Documents/yubik/exports/bootstrap.ldif
+```
+
+Az exportált LDIF-et teheted:
+
+- a repositoryban például `exports/full-tree.ldif` vagy `exports/bootstrap.ldif` alá
+- bármely abszolút elérési útra a control node-on
+
+Az Ansible role a relatív útvonalakat a repository gyökeréhez viszonyítva oldja fel.
+
+## Full tree import futtatása
+
+Teljes restore jellegű import:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_admin_password='<set-admin-password>' \
+  -e ldap_ldif_import_enabled=true \
+  -e ldap_ldif_import_file=exports/full-tree.ldif
+```
+
+Bootstrap LDIF import:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_admin_password='<set-admin-password>' \
+  -e ldap_bootstrap_ldif_file=exports/bootstrap.ldif
+```
+
+Fontos restore megjegyzések:
+
+- a full restore alapból csak üres tree-re ajánlott
+- ha a base DN alatt már vannak child entry-k, a playbook megáll
+- ezt csak akkor írd felül, ha biztosan restore-t akarsz:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_admin_password='<set-admin-password>' \
+  -e ldap_ldif_import_enabled=true \
+  -e ldap_ldif_import_file=exports/full-tree.ldif \
+  -e ldap_force_full_import=true
+```
+
+Idempotencia megjegyzés:
+
+- alapértelmezésben a bootstrap marker itt jön létre: `/opt/openldap-ykbind/data/.bootstrap-import-done`
+- alapértelmezésben a full import marker itt jön létre: `/opt/openldap-ykbind/data/.full-import-done`
+- ha újra akarod futtatni az importot, a marker törlése mellett a perzisztens LDAP adatot is tisztázni kell
+
+## TLS / LDAPS
+
+Az image nyitja a `389` és `636` portot. A playbook támogatja az LDAPS bekapcsolását, de a tanúsítványkezelést szándékosan egyszerű, bővíthető formában hagyja meg.
+
+Legkényelmesebb használat:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_admin_password='<set-admin-password>' \
+  -e ldap_enable_ldaps=true \
+  -e ldap_tls_certificate_src=tls/tls.crt \
+  -e ldap_tls_private_key_src=tls/tls.key \
+  -e ldap_tls_ca_src=tls/ca.crt
+```
+
+Ekkor a role:
+
+- bemásolja a fájlokat a target host `runtime/tls/` könyvtárába
+- mountolja őket a konténerbe
+- beírja az LDAP TLS útvonalakat a `cn=config` alá
+
+Használt változók:
+
+- `ldap_enable_ldaps`
+- `ldap_ldaps_port`
+- `ldap_tls_certificate_src`
+- `ldap_tls_private_key_src`
+- `ldap_tls_ca_src`
+- `ldap_tls_cert_file`
+- `ldap_tls_key_file`
+- `ldap_tls_ca_file`
+
+## Modul build és deploy működés
+
+Az image build nem csak bemásolja a modult, hanem ténylegesen le is fordítja.
+
+Fő pontok:
+
+- Debian 12 alapú multi-stage Docker build
+- `apt-get build-dep openldap`
+- `apt-get source openldap`
+- a repositoryban lévő [Makefile](/home/username/Documents/yubik/Makefile) fut
+- a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
+- a playbook utána betölti a modult a `cn=module{0},cn=config` alá
+- végül felveszi az overlayt a fő adatbázisra
+
+Ha kézzel akarod debugolni a buildet, a legegyszerűbb a target hoston az Ansible által kirakott build contextet használni:
+
+```bash
+docker build -t openldap-ykbind:debug /opt/openldap-ykbind/build
+```
+
+Deploy oldalon a modul buildje kikapcsolható:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_module_build_enabled=false
+```
+
+## LDAP inicializálás és konfiguráció
+
+A deploy során a role:
+
+- létrehozza a base DN entryt, ha még nem létezik
+- létrehozza a `ldap_base_ous` listában szereplő OU-kat
+- importálja a saját schema LDIF-et
+- opcionálisan további schema LDIF-eket is importál a `ldap_additional_schema_ldifs` listából
+- szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
+- opcionálisan TLS fájlútvonalakat konfigurál a `cn=config` alatt
+
+Megjegyzés: a `slapd` Debianos inicializálása a `ldap_domain` alapján hozza létre az első suffixet. A legtisztább működéshez a `ldap_domain` és `ldap_base_dn` legyen összhangban.
+
+## Ellenőrzés deploy után
+
+Az Ansible smoke tesztek automatikusan lefutnak, de manuálisan ezek a leghasznosabb parancsok:
+
+Konténer állapot:
+
+```bash
+docker compose -f /opt/openldap-ykbind/docker-compose.yml ps
+```
+
+Admin bind:
+
+```bash
+docker exec openldap-ykbind ldapwhoami \
+  -x -D "cn=admin,dc=example,dc=org" \
+  -w '<set-admin-password>' \
+  -H ldap://127.0.0.1
+```
+
+Base query:
+
+```bash
+docker exec openldap-ykbind ldapsearch \
+  -x -D "cn=admin,dc=example,dc=org" \
+  -w '<set-admin-password>' \
+  -H ldap://127.0.0.1 \
+  -LLL -b "dc=example,dc=org" -s base "(objectClass=*)" dn
+```
+
+Schema és overlay jelenlét:
+
+```bash
+docker exec openldap-ykbind ldapsearch \
+  -Q -Y EXTERNAL -H ldapi:/// \
+  -LLL -b cn=schema,cn=config "(cn=yubikey-otp)" dn
+
+docker exec openldap-ykbind ldapsearch \
+  -Q -Y EXTERNAL -H ldapi:/// \
+  -LLL -b cn=config "(olcOverlay=ykbind)" dn
+```
+
+## Az overlay működése röviden
+
+A kliens simple bind credentialt küld:
+
+```text
+<password><otp>
+```
+
+Az overlay:
+
+- levágja a végéről a 44 karakteres OTP-t
+- ellenőrzi a modhex és AES ticket adatot
+- ellenőrzi a replay állapotot
+- siker esetén a maradék statikus jelszót adja át a normál OpenLDAP jelszóellenőrzésnek
+- sikeres bind után frissíti a replay mezőket
+
+Fő schema attribútumok:
 
 - `yubiKeyEnabled`
 - `yubiKeyPublicId`
@@ -33,344 +396,27 @@ Az új schema elsődleges mezői:
 - `yubiKeyLastTimestamp`
 - `yubiKeyLastCounter`
 
-A schema kompatibilitási aliasokat is ad a régi 389 DS mezőkhöz:
+Kompatibilitási aliasok:
 
 - `YKkeyID`
 - `YKaesKey`
 - `YKkeyCounter`
 - `YKsessionTimestamp`
 
-Ezért meglévő 389 DS-ből hozott attribútumnevekkel is működhet a migráció.
+## Kézi LDAP példák
 
-Megjegyzés: a schema fájlban szereplő `1.3.6.1.4.1.55555.*` OID-ok mintaként szerepelnek. Éles környezetben célszerű saját enterprise OID alá tenni őket.
+Megmaradt kézi referenciafájlok:
 
-## Build Debianon
+- [examples/module-load.ldif](/home/username/Documents/yubik/examples/module-load.ldif)
+- [examples/module-path-and-load.ldif](/home/username/Documents/yubik/examples/module-path-and-load.ldif)
+- [examples/overlay-config.ldif](/home/username/Documents/yubik/examples/overlay-config.ldif)
+- [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif)
 
-OpenLDAP overlay építéshez nem elég a kliens oldali `libldap-dev`, mert a modul belső `slapd` fejléceket használ. Emiatt a modult **azonos verziójú OpenLDAP forrásfához** kell fordítani, mint ami a célgépen fut.
-
-Ez a repo jelenleg a crash-javított változatot tartalmazza:
-
-- backend-konzisztens entry release
-- robusztusabb OTP suffix-leválasztás
-- részletesebb hibalogok
-- OpenLDAP 2.6 build-kompatibilitási javítás
-
-### Szükséges csomagok
-
-Debian Bookwormon legalább:
-
-- `build-essential`
-- `libssl-dev`
-- `libldap-dev`
-- `slapd`
-- `ldap-utils`
-- `dpkg-dev`
-- `apt-src` vagy `deb-src` engedélyezett APT source
-
-### Forrás előkészítése
-
-```bash
-sudo apt-get update
-sudo apt-get install build-essential libssl-dev libldap-dev slapd ldap-utils dpkg-dev
-apt-get source openldap
-cd openldap-*
-./configure
-cd /path/to/this/repo
-make OPENLDAP_SRC=/path/to/openldap-* OPENLDAP_BUILD=/path/to/openldap-*
-```
-
-Ha a célrendszer más OpenLDAP verziót futtat, mindig ahhoz pontosan illeszkedő forrással fordíts.
-
-OpenLDAP `2.5.13` alatt a folyamat ugyanaz. A fontos szabály:
-
-- a `2.5.13`-as `slapd`-hez `2.5.13`-as OpenLDAP forrással fordíts
-- a modul `cn=config` oldalon ugyanúgy tölthető be
-- meglévő adatbázis struktúrát nem kell átalakítani, csak schema + overlay + user attribútumok kerülnek hozzá
-
-### Telepítés
-
-```bash
-sudo install -d /usr/lib/ldap
-sudo install -m 0755 ykbind.so /usr/lib/ldap/ykbind.so
-```
-
-Megjegyzés: Debianon az OpenLDAP modulkönyvtár jellemzően `/usr/lib/ldap`.
-
-## Schema betöltés `cn=config` alatt
-
-1. Töltsd be a schema LDIF-et:
-
-```bash
-ldapadd -Y EXTERNAL -H ldapi:/// -f schema/yubikey-otp.ldif
-```
-
-2. Töltsd be a modult:
-
-```bash
-ldapmodify -Y EXTERNAL -H ldapi:/// -f examples/module-load.ldif
-```
-
-Ha a szerveren még nincs beállítva a modulkönyvtár:
-
-```bash
-ldapmodify -Y EXTERNAL -H ldapi:/// -f examples/module-path-and-load.ldif
-```
-
-3. Add hozzá az overlayt a megfelelő adatbázishoz:
-
-Az `{1}mdb` részt igazítsd a saját `olcDatabase` sorszámodhoz.
-Az overlayt azon a backend adatbázison kell aktiválni, ahol a felhasználói entryk és a `userPassword` attribútum található. Ha több auth adatbázisod van, mindegyiken külön fel kell venni.
-
-```bash
-ldapadd -Y EXTERNAL -H ldapi:/// -f examples/overlay-config.ldif
-```
-
-4. Ellenőrizd a konfigurációt:
-
-```bash
-slaptest -u -F /etc/ldap/slapd.d
-systemctl restart slapd
-journalctl -u slapd -n 100 --no-pager
-```
-
-## Meglévő OpenLDAP 2.5.13 adatbázishoz hozzáadás
-
-Ha már van működő `cn=config`-os OpenLDAP adatbázisod, a tipikus sorrend:
-
-1. fordítsd le a modult a pontos `2.5.13` forrásfához
-2. töltsd be a schema-t
-3. töltsd be a modult
-4. add hozzá az overlayt a megfelelő `olcDatabase={N}...` adatbázishoz
-5. add hozzá az ACL-t a YubiKey secret mezők védelmére
-6. userenként add hozzá a `yubiKeyTokenAux` objectClass-t és a YubiKey attribútumokat
-
-Az adatbázis sorszámát így tudod megkeresni:
-
-```bash
-ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -b cn=config '(olcDatabase=*)' dn olcDatabase olcSuffix
-```
-
-Ha például a suffixed `dc=nodomain`, és azt az `olcDatabase={1}mdb,cn=config` kezeli, akkor az overlayt és az ACL-t azon az adatbázison kell módosítani.
-
-## ACL minta
-
-Példa meglévő adatbázisra:
-
-```bash
-ldapmodify -Q -Y EXTERNAL -H ldapi:/// -f examples/acl-yubikey-secrets.ldif
-```
-
-Az [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif) fájlban az `olcDatabase={1}mdb` és az admin DN mintaérték, ezt a saját adatbázisodra kell átírni.
-
-## Példa user entry
-
-```ldif
-dn: uid=alice,ou=People,dc=example,dc=com
-objectClass: inetOrgPerson
-objectClass: yubiKeyTokenAux
-uid: alice
-sn: Example
-cn: Alice Example
-userPassword: {SSHA}...
-yubiKeyEnabled: TRUE
-yubiKeyPublicId: cccjgjgkhcbb
-yubiKeyPrivateUid: 001122334455
-yubiKeyAesKey: 8899aabbccddeeff0011223344556677
-yubiKeyLastUseCtr: 0
-yubiKeyLastSessionCtr: 0
-yubiKeyLastTimestamp: 0
-yubiKeyLastCounter: 000000
-YKsessionTimestamp: 000000
-```
-
-## Userenkénti bekapcsolás meglévő usereknél
-
-A legegyszerűbb, ha nem új entryt hozol létre, hanem a meglévő userre `modify` művelettel ráteszed a YubiKey objectClass-t és attribútumokat.
-
-Minta:
-
-```bash
-ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f examples/user-enable-template.ldif
-```
-
-A fájl:
-
-- [examples/user-enable-template.ldif](/home/username/Documents/yubik/examples/user-enable-template.ldif)
-
-Mit kell benne személyre szabni:
-
-- `dn`
-- `yubiKeyPublicId`
-- `yubiKeyPrivateUid`
-- `yubiKeyAesKey`
-
-Ha egy usernél átmenetileg ki akarod kapcsolni, de az adatokat megtartanád:
-
-```bash
-ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f examples/user-disable-template.ldif
-```
-
-Ha teljesen le akarod venni a YubiKey mezőket:
-
-```bash
-ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f examples/user-remove-template.ldif
-```
-
-Kapcsolódó minták:
-
-- [examples/user-disable-template.ldif](/home/username/Documents/yubik/examples/user-disable-template.ldif)
-- [examples/user-remove-template.ldif](/home/username/Documents/yubik/examples/user-remove-template.ldif)
-
-## Bulk kulcsfeltöltés meglévő userekhez
-
-A repo tartalmaz egy egyszerű, semicolon-delimited CSV→LDIF generátort meglévő userekhez.
-
-CSV minta:
-
-- [examples/bulk-users-template.csv](/home/username/Documents/yubik/examples/bulk-users-template.csv)
-
-Oszlopok:
-
-- `dn`
-- `public_id`
-- `private_uid_hex`
-- `aes_key_hex`
-- `enabled`
-
-Fontos: a minta **pontosvesszővel** (`;`) elválasztott formátumot használ, mert a DN mező önmagában is vesszőket tartalmaz.
-
-Generálás:
-
-```bash
-chmod +x tools/generate-yubikey-ldif.sh
-tools/generate-yubikey-ldif.sh examples/bulk-users-template.csv > bulk-yubikey-users.ldif
-```
-
-Betöltés:
-
-```bash
-ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f bulk-yubikey-users.ldif
-```
-
-A script:
-
-- [tools/generate-yubikey-ldif.sh](/home/username/Documents/yubik/tools/generate-yubikey-ldif.sh)
-
-A script minden usernél:
-
-- hozzáadja a `yubiKeyTokenAux` objectClass-t
-- beállítja a `yubiKeyEnabled` flaget
-- feltölti a `publicId`, `privateUid`, `aesKey` mezőket
-- nullázza a replay mezőket
-
-Példa saját CSV-re:
-
-```csv
-dn;public_id;private_uid_hex;aes_key_hex;enabled
-uid=alice,ou=people,dc=example,dc=org;cccccccccccb;001122334455;8899aabbccddeeff0011223344556677;TRUE
-uid=test1,ou=people,dc=example,dc=org;cccccccccccb;001122334455;8899aabbccddeeff0011223344556677;FALSE
-```
-
-## Gyors ellenőrzések bulk után
-
-```bash
-ldapsearch -x -LLL -b "ou=people,dc=example,dc=com" '(objectClass=yubiKeyTokenAux)' dn yubiKeyEnabled yubiKeyPublicId
-```
-
-Egy konkrét user secret mezőinek admin oldali ellenőrzése:
-
-```bash
-ldapsearch -x -LLL -D "cn=admin,dc=example,dc=com" -W \
-  -b "uid=alice,ou=People,dc=example,dc=com" '(objectClass=*)' \
-  dn yubiKeyEnabled yubiKeyPublicId yubiKeyPrivateUid yubiKeyAesKey
-```
-
-## ACL ajánlás
-
-Az AES kulcsot csak az admin/rootdn és a slapd belső folyamatai láthassák:
-
-```ldif
-olcAccess: to attrs=yubiKeyAesKey,yubiKeyPrivateUid,yubiKeyLastUseCtr,yubiKeyLastSessionCtr,yubiKeyLastTimestamp,yubiKeyLastCounter,YKsessionTimestamp
-  by dn.exact="cn=admin,dc=example,dc=com" manage
-  by * none
-```
-
-## Tesztelés
-
-### Helyes jelszó + helyes OTP
-
-```bash
-ldapwhoami -x \
-  -D "uid=alice,ou=People,dc=example,dc=com" \
-  -w 'MyStaticPasswordccccccdefghdefghdefghdefghdefghdefghjk'
-```
-
-Várt eredmény: sikeres bind.
-
-### Helyes jelszó + hibás OTP
-
-```bash
-ldapwhoami -x \
-  -D "uid=alice,ou=People,dc=example,dc=com" \
-  -w 'MyStaticPasswordccccccdefghdefghdefghdefghdefghdefghjj'
-```
-
-Várt eredmény: `Invalid credentials`.
-
-### Hibás jelszó + helyes OTP
-
-Ugyanaz az OTP, de rossz statikus prefix.
-
-Várt eredmény: `Invalid credentials`.
-
-Megjegyzés: ezt valóban csak friss, érvényes OTP-vel lehet lefedni. Dummy modhex stringgel az overlay az OTP hibáján fog elhasalni még a statikus jelszó ellenőrzése előtt.
-
-### Újrahasznált OTP
-
-Egy már sikeresen elfogadott OTP-t küldj be újra ugyanazzal a felhasználóval.
-
-Várt eredmény: `Invalid credentials`.
-
-### Rossz OTP formátum
-
-- nem 44 karakter
-- nem modhex karakterekből áll
-
-Várt eredmény: `Invalid credentials`.
-
-### Túl rövid credential
-
-Ha a credential hossza `<= 44`, nincs benne statikus jelszó prefix.
-
-Várt eredmény: `Invalid credentials`.
-
-### További negatív tesztek
-
-- rossz public ID, de 44 karakteres modhex suffix
-- helyes public ID, de CRC-hibás OTP
-- hibás karakter a suffix közepén vagy végén
-- csak OTP, statikus jelszó nélkül
-- hosszú statikus jelszó + rossz suffix
-
-Várt eredmény minden esetben: `Invalid credentials`, a `slapd` folyamat nem eshet el.
-
-## Linux login flow
-
-Ez a megoldás akkor működik jól, ha a Linux kliens stack a felhasználó által beírt teljes jelszót LDAP simple bind credentialként továbbítja. Ilyenkor a felhasználó UX:
-
-`normál_jelszó + yubikey_otp`
-
-Példa:
-
-`CorrectHorseBatteryStapleccccccdefghdefghdefghdefghdefghdefghjk`
-
-Ha a kliensoldali PAM komponens a jelszót módosítja, feldarabolja, vagy nem simple bindot használ, az overlay nem fog tudni helyesen dolgozni.
+Ezek főleg debughoz és kézi finomhangoláshoz hasznosak; a normál deploy út az Ansible playbook.
 
 ## Ismert korlátok
 
-1. Az OpenLDAP overlay modul belső `slapd` fejlécekre épül, ezért verzióazonos OpenLDAP forrással kell fordítani.
-2. A replay állapot frissítése sikeres bind után belső modify-val történik, ezért az entrynek írhatónak kell lennie a slapd belső művelet számára.
-3. Nagyon szoros, egyszerre történő párhuzamos bindoknál ugyanazzal az OTP-vel lehet versenyhelyzet, mert a replay állapot ellenőrzése és frissítése nem backend-szintű compare-and-swap tranzakció.
-4. A megoldás YubiKey OTP-t kezel, nem OATH-HOTP/TOTP módot.
-5. A schema példa OID-okkal érkezik; élesítés előtt saját OID-ra érdemes átírni.
-6. A bulk import script egyszerű, pontosvesszővel elválasztott admin inputra készült; idézőjeles/escaped CSV mezőket nem kezel.
+- a full tree import restore jellegű, nem általános merge mechanizmus
+- a `olcRootPW` idempotens cseréje csak akkor fut le, ha a suffix/rootDN eltér vagy a `ldap_force_password_reset=true`
+- a `ldap_domain` és `ldap_base_dn` eltérése támogatott, de nem ez a Debian `slapd` inicializálás natív útja
+- TLS esetén a tanúsítványanyag meglétét a role ellenőrzi, de a PKI életciklus-kezelést nem automatizálja

@@ -1,0 +1,74 @@
+---
+ldap_deploy_root: /opt/openldap-ykbind
+ldap_build_context_dir: "{{ ldap_deploy_root }}/build"
+ldap_runtime_dir: "{{ ldap_deploy_root }}/runtime"
+ldap_runtime_ldif_dir: "{{ ldap_runtime_dir }}/ldif"
+ldap_runtime_schema_dir: "{{ ldap_runtime_dir }}/schema"
+ldap_runtime_import_dir: "{{ ldap_runtime_ldif_dir }}/imports"
+ldap_tls_host_dir: "{{ ldap_runtime_dir }}/tls"
+ldap_compose_file: "{{ ldap_deploy_root }}/docker-compose.yml"
+
+ldap_data_dir: "{{ ldap_deploy_root }}/data"
+ldap_config_dir: "{{ ldap_deploy_root }}/config"
+ldap_log_dir: "{{ ldap_deploy_root }}/logs"
+
+ldap_container_name: openldap-ykbind
+ldap_image_name: openldap-ykbind:latest
+
+ldap_domain: example.org
+ldap_base_dn: dc=example,dc=org
+ldap_organization: Example Organization
+ldap_admin_dn: "cn=admin,{{ ldap_base_dn }}"
+ldap_admin_password: changeme
+
+ldap_listen_port: 389
+ldap_ldaps_port: 636
+ldap_ports: []
+
+ldap_http_proxy: http://proxy.example.net:3128
+ldap_https_proxy: http://proxy.example.net:3128
+ldap_no_proxy: localhost,127.0.0.1
+ldap_proxy_env:
+  http_proxy: "{{ ldap_http_proxy }}"
+  https_proxy: "{{ ldap_https_proxy }}"
+  no_proxy: "{{ ldap_no_proxy }}"
+
+ldap_manage_host_packages: true
+ldap_host_packages:
+  - docker.io
+  - docker-compose-plugin
+
+ldap_module_build_enabled: true
+ldap_enable_ldaps: false
+ldap_force_password_reset: false
+
+ldap_base_object_classes:
+  - top
+  - dcObject
+  - organization
+ldap_base_additional_attributes:
+  o: "{{ ldap_organization }}"
+  description: Managed by Ansible
+ldap_base_ous:
+  - People
+  - Groups
+  - Services
+
+ldap_additional_schema_ldifs: []
+ldap_bootstrap_ldif_file: ""
+ldap_ldif_import_enabled: false
+ldap_ldif_import_file: ""
+ldap_force_full_import: false
+
+ldap_tls_certificate_src: ""
+ldap_tls_private_key_src: ""
+ldap_tls_ca_src: ""
+ldap_tls_cert_file: /etc/ldap/tls/tls.crt
+ldap_tls_key_file: /etc/ldap/tls/tls.key
+ldap_tls_ca_file: /etc/ldap/tls/ca.crt
+
+ldap_smoke_test_user_dn: ""
+
+ldap_full_import_marker: "{{ ldap_data_dir }}/.full-import-done"
+ldap_bootstrap_import_marker: "{{ ldap_data_dir }}/.bootstrap-import-done"
+

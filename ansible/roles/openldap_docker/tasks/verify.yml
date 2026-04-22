@@ -1,0 +1,87 @@
+---
+- name: Smoke test admin bind with ldapwhoami
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapwhoami
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+  register: ldap_whoami_check
+  changed_when: false
+
+- name: Smoke test base search
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+      - -LLL
+      - -b
+      - "{{ ldap_base_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - dn
+  register: ldap_base_search_check
+  changed_when: false
+
+- name: Smoke test ykbind overlay visibility
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - "{{ ldap_database_config_dn }}"
+      - "(olcOverlay=ykbind)"
+      - dn
+  register: ldap_overlay_smoke_check
+  changed_when: false
+  when: ldap_module_build_enabled
+
+- name: Optional smoke test for a specific user DN
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -x
+      - -D
+      - "{{ ldap_admin_dn }}"
+      - -w
+      - "{{ ldap_admin_password }}"
+      - -H
+      - ldap://127.0.0.1
+      - -LLL
+      - -b
+      - "{{ ldap_smoke_test_user_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - dn
+  changed_when: false
+  when: ldap_smoke_test_user_dn | length > 0
+
