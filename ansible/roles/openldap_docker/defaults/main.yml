@@ -2,6 +2,8 @@
 ldap_deploy_root: /opt/openldap-ykbind
 ldap_container_name: openldap-ykbind
 ldap_image_name: openldap-ykbind:latest
+ldap_container_base_image: debian:trixie
+ldap_docker_build_network: host
 
 ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
 ldap_local_build_context_dir: "{{ ldap_local_artifact_root }}/context"

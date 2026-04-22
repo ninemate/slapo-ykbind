@@ -67,8 +67,12 @@
     argv:
       - docker
       - build
+      - --network
+      - "{{ ldap_docker_build_network }}"
       - -t
       - "{{ ldap_image_name }}"
+      - --build-arg
+      - "BASE_IMAGE={{ ldap_container_base_image }}"
       - --build-arg
       - "http_proxy={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
       - --build-arg
@@ -86,6 +90,13 @@
       - "{{ ldap_local_build_context_dir }}"
   register: ldap_local_docker_build
   changed_when: true
+  environment:
+    http_proxy: "{{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
+    https_proxy: "{{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
+    no_proxy: "{{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
+    HTTP_PROXY: "{{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
+    HTTPS_PROXY: "{{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
+    NO_PROXY: "{{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
   delegate_to: localhost
   become: false
   run_once: true

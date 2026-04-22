@@ -101,6 +101,7 @@ ldap_admin_password: changeme
 
 ldap_container_name: openldap-ykbind
 ldap_image_name: openldap-ykbind:latest
+ldap_container_base_image: debian:trixie
 ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
 
 ldap_http_proxy: http://proxy.example.net:3128
@@ -126,6 +127,8 @@ További fontos, deploy közben gyakran használt változók:
 
 - `ldap_base_ous`
 - `ldap_ports`
+- `ldap_container_base_image`
+- `ldap_docker_build_network`
 - `ldap_force_password_reset`
 - `ldap_force_full_import`
 - `ldap_tls_certificate_src`
@@ -190,6 +193,8 @@ Lokális control node build artifactok alapértelmezett helye:
 ```text
 /tmp/openldap-ykbind-artifacts
 ```
+
+Fontos: mivel az image build a control node-on fut, a `ldap_http_proxy`, `ldap_https_proxy` és `ldap_no_proxy` változók a control node nézőpontjából értendők. Ha a proxy csak a guest VM-ből érhető el, de a control node-ról nem, a megakadás a `Build OpenLDAP image on control node` task alatt fog jelentkezni.
 
 ## Full tree export meglévő LDAP-ból
 

@@ -1,4 +1,6 @@
-FROM debian:trixie AS builder
+ARG BASE_IMAGE=debian:trixie
+
+FROM ${BASE_IMAGE} AS builder
 
 ARG http_proxy=http://proxy.example.net:3128
 ARG https_proxy=http://proxy.example.net:3128
@@ -41,7 +43,7 @@ RUN set -eux; \
       install -D -m 0755 ykbind.so /build-out/usr/lib/ldap/ykbind.so; \
     fi
 
-FROM debian:trixie
+FROM ${BASE_IMAGE}
 
 ARG http_proxy=http://proxy.example.net:3128
 ARG https_proxy=http://proxy.example.net:3128
