@@ -19,27 +19,51 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
 
 COPY noCheckValidUntil /etc/apt/apt.conf.d/noCheckValidUntil
-COPY module/ /usr/src/ykbind/
 
 RUN set -eux; \
     sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources; \
     apt-get -y update; \
-    apt-get -y upgrade --fix-missing; \
-    apt-get -y install build-essential ca-certificates devscripts dpkg-dev libldap-dev libssl-dev patch; \
-    apt-get -y build-dep openldap; \
-    mkdir -p /build-out/usr/lib/ldap; \
+    apt-get -y install --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      dpkg-dev \
+      libldap-dev \
+      libsasl2-dev \
+      libssl-dev \
+      patch \
+      pkg-config; \
     if [ "${LDAP_MODULE_BUILD_ENABLED}" = "true" ]; then \
       cd /usr/src; \
       apt-get source openldap; \
+    fi; \
+    mkdir -p /build-out/usr/lib/ldap; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY module/ /usr/src/ykbind/
+
+RUN set -eux; \
+    if [ "${LDAP_MODULE_BUILD_ENABLED}" = "true" ]; then \
+      cd /usr/src; \
       srcdir="$(find /usr/src -maxdepth 1 -mindepth 1 -type d -name 'openldap-*' | sort | head -n 1)"; \
       [ -n "${srcdir}" ]; \
       if [ -f /usr/src/ykbind/patches/openldap-2.6.10-sasl-getconfpath-guard.patch ]; then \
         patch -d "${srcdir}" -p1 < /usr/src/ykbind/patches/openldap-2.6.10-sasl-getconfpath-guard.patch || true; \
       fi; \
-      cd "${srcdir}"; \
-      ./configure; \
+      if [ -f "${srcdir}/build/ldap_config.h" ] || [ -f "${srcdir}/build/include/ldap_config.h" ]; then \
+        builddir="${srcdir}/build"; \
+      else \
+        builddir="/usr/src/openldap-build"; \
+        mkdir -p "${builddir}"; \
+        cd "${builddir}"; \
+        "${srcdir}/configure"; \
+      fi; \
+      if [ ! -f "${builddir}/ldap_config.h" ] && [ ! -f "${builddir}/include/ldap_config.h" ]; then \
+        echo "ldap_config.h not found under ${builddir}" >&2; \
+        find "${builddir}" -maxdepth 3 \( -name ldap_config.h -o -name portable.h -o -name ldap_features.h \) -print >&2 || true; \
+        exit 1; \
+      fi; \
       cd /usr/src/ykbind; \
-      make OPENLDAP_SRC="${srcdir}" OPENLDAP_BUILD="${srcdir}"; \
+      make OPENLDAP_SRC="${srcdir}" OPENLDAP_BUILD="${builddir}"; \
       install -D -m 0755 ykbind.so /build-out/usr/lib/ldap/ykbind.so; \
     fi
 
@@ -68,9 +92,8 @@ COPY healthcheck.sh /healthcheck.sh
 RUN set -eux; \
     echo "slapd slapd/no_configuration boolean true" | debconf-set-selections; \
     apt-get -y update; \
-    apt-get -y upgrade --fix-missing; \
-    apt-get -y install telnet tcpdump vim net-tools procps openssh-client; \
-    apt-get -y install slapd ldap-utils syslog-ng logrotate ca-certificates; \
+    apt-get -y install --no-install-recommends telnet tcpdump vim net-tools procps openssh-client; \
+    apt-get -y install --no-install-recommends slapd ldap-utils syslog-ng logrotate ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /opt/openldap/bootstrap /var/log/slapd; \
     chmod +x /entrypoint.sh /healthcheck.sh

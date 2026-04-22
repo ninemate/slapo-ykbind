@@ -334,6 +334,8 @@ ansible-playbook playbooks/deploy-openldap.yml \
   -e ldap_module_build_enabled=false
 ```
 
+Ez hasznos gyors sanity checkhez is: így először a konténer deploy láncot tudod validálni a saját overlay buildje nélkül, majd csak utána kapcsolod vissza a modulfodítást.
+
 ## LDAP inicializálás és konfiguráció
 
 A deploy során a role:
