@@ -1,0 +1,55 @@
+---
+- name: Wait before next build log poll
+  ansible.builtin.pause:
+    seconds: "{{ ldap_local_build_poll_delay }}"
+  when: poll_idx | int > 0
+  run_once: true
+
+- name: Check local docker build status
+  ansible.builtin.async_status:
+    jid: "{{ ldap_local_build_async.ansible_job_id }}"
+  register: ldap_local_build_status_result
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Count lines currently written to local build log
+  ansible.builtin.shell: |
+    if [ -f "{{ ldap_local_build_log }}" ]; then
+      wc -l < "{{ ldap_local_build_log }}"
+    else
+      echo 0
+    fi
+  args:
+    executable: /bin/bash
+  register: ldap_local_build_log_line_count_cmd
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Read new local build log lines
+  ansible.builtin.shell: |
+    if [ -f "{{ ldap_local_build_log }}" ] && [ "{{ ldap_local_build_log_line_count_cmd.stdout | int }}" -gt "{{ ldap_local_build_log_line_count | int }}" ]; then
+      sed -n "$(({{ ldap_local_build_log_line_count | int }} + 1)),{{ ldap_local_build_log_line_count_cmd.stdout | int }}p" "{{ ldap_local_build_log }}"
+    fi
+  args:
+    executable: /bin/bash
+  register: ldap_local_build_log_chunk
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Print new local docker build output
+  ansible.builtin.debug:
+    msg: "{{ ldap_local_build_log_chunk.stdout }}"
+  when: (ldap_local_build_log_chunk.stdout | default('')) | length > 0
+  run_once: true
+
+- name: Update local build polling facts
+  ansible.builtin.set_fact:
+    ldap_local_build_finished: "{{ ldap_local_build_status_result.finished | default(0) | int == 1 }}"
+    ldap_local_build_log_line_count: "{{ ldap_local_build_log_line_count_cmd.stdout | int }}"
+    ldap_local_build_result_rc: "{{ ldap_local_build_status_result.rc | default(-1) }}"
+  run_once: true

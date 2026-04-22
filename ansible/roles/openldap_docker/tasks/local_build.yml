@@ -62,34 +62,34 @@
   become: false
   run_once: true
 
-- name: Build OpenLDAP image on control node
-  ansible.builtin.command:
-    argv:
-      - docker
-      - build
-      - --network
-      - "{{ ldap_docker_build_network }}"
-      - -t
-      - "{{ ldap_image_name }}"
-      - --build-arg
-      - "BASE_IMAGE={{ ldap_container_base_image }}"
-      - --build-arg
-      - "http_proxy={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
-      - --build-arg
-      - "https_proxy={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
-      - --build-arg
-      - "no_proxy={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
-      - --build-arg
-      - "HTTP_PROXY={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
-      - --build-arg
-      - "HTTPS_PROXY={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
-      - --build-arg
-      - "NO_PROXY={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
-      - --build-arg
-      - "LDAP_MODULE_BUILD_ENABLED={{ (ldap_module_build_enabled | bool) | ternary('true', 'false') }}"
-      - "{{ ldap_local_build_context_dir }}"
-  register: ldap_local_docker_build
-  changed_when: true
+- name: Remove previous local docker build log
+  ansible.builtin.file:
+    path: "{{ ldap_local_build_log }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Start OpenLDAP image build on control node with live log capture
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker build --progress=plain \
+      --network "{{ ldap_docker_build_network }}" \
+      -t "{{ ldap_image_name }}" \
+      --build-arg "BASE_IMAGE={{ ldap_container_base_image }}" \
+      --build-arg "http_proxy={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}" \
+      --build-arg "https_proxy={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}" \
+      --build-arg "no_proxy={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}" \
+      --build-arg "HTTP_PROXY={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}" \
+      --build-arg "HTTPS_PROXY={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}" \
+      --build-arg "NO_PROXY={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}" \
+      --build-arg "LDAP_MODULE_BUILD_ENABLED={{ (ldap_module_build_enabled | bool) | ternary('true', 'false') }}" \
+      "{{ ldap_local_build_context_dir }}" 2>&1 | tee "{{ ldap_local_build_log }}"
+  args:
+    executable: /bin/bash
+  register: ldap_local_build_async
+  async: "{{ ldap_local_build_async_timeout }}"
+  poll: 0
   environment:
     http_proxy: "{{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
     https_proxy: "{{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
@@ -97,8 +97,37 @@
     HTTP_PROXY: "{{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
     HTTPS_PROXY: "{{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
     NO_PROXY: "{{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
+    DOCKER_BUILDKIT: "1"
+    BUILDKIT_PROGRESS: plain
   delegate_to: localhost
   become: false
+  run_once: true
+
+- name: Initialize local build polling facts
+  ansible.builtin.set_fact:
+    ldap_local_build_finished: false
+    ldap_local_build_log_line_count: 0
+    ldap_local_build_result_rc: -1
+  run_once: true
+
+- name: Poll local build and print new output
+  ansible.builtin.include_tasks: local_build_poll.yml
+  loop: "{{ range(0, ldap_local_build_max_polls | int) | list }}"
+  loop_control:
+    loop_var: poll_idx
+  when: not (ldap_local_build_finished | default(false))
+  run_once: true
+
+- name: Fail when local docker build did not finish before timeout
+  ansible.builtin.fail:
+    msg: "A docker build nem fejeződött be a megadott időn belül. Log: {{ ldap_local_build_log }}"
+  when: not (ldap_local_build_finished | default(false))
+  run_once: true
+
+- name: Fail when local docker build returned non-zero
+  ansible.builtin.fail:
+    msg: "A docker build hibával állt le. Log: {{ ldap_local_build_log }}"
+  when: (ldap_local_build_result_rc | int) != 0
   run_once: true
 
 - name: Export image tarball on control node
