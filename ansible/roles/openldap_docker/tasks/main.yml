@@ -1,4 +1,7 @@
 ---
+- name: Derive effective input values
+  ansible.builtin.import_tasks: derive_inputs.yml
+
 - name: Build image on control node
   ansible.builtin.import_tasks: local_build.yml
 

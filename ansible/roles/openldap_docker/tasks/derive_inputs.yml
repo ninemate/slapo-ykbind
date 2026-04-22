@@ -1,0 +1,36 @@
+---
+- name: Set import mode facts
+  ansible.builtin.set_fact:
+    ldap_full_import_requested: "{{ (ldap_ldif_import_enabled | bool) or (ldap_ldif_import_file | length > 0) }}"
+    ldap_ldif_import_src_path: >-
+      {{ ldap_ldif_import_file if (ldap_ldif_import_file | length > 0 and ldap_ldif_import_file.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_ldif_import_file) if (ldap_ldif_import_file | length > 0)
+         else '' }}
+
+- name: Read first DN from full import LDIF on control node
+  ansible.builtin.shell: |
+    awk 'BEGIN{IGNORECASE=1} /^dn:[[:space:]]*/ { sub(/^dn:[[:space:]]*/, "", $0); print; exit }' "{{ ldap_ldif_import_src_path }}"
+  args:
+    executable: /bin/bash
+  register: ldap_first_import_dn_cmd
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: ldap_full_import_requested and (ldap_ldif_import_src_path | length > 0)
+
+- name: Auto-derive base DN from import LDIF when default example DN is still used
+  ansible.builtin.set_fact:
+    ldap_base_dn: "{{ ldap_first_import_dn_cmd.stdout | trim }}"
+  when:
+    - ldap_full_import_requested
+    - (ldap_first_import_dn_cmd.stdout | default('') | trim | length) > 0
+    - ldap_base_dn == 'dc=example,dc=org'
+
+- name: Auto-derive admin DN from derived base DN when default example admin DN is still used
+  ansible.builtin.set_fact:
+    ldap_admin_dn: "cn=admin,{{ ldap_base_dn }}"
+  when:
+    - ldap_full_import_requested
+    - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
+

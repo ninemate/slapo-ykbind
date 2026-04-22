@@ -44,12 +44,9 @@ ensure_dir /etc/ldap/slapd.d
 ensure_dir /var/log/slapd
 ensure_dir /run/slapd
 
-chown -R openldap:openldap /var/lib/ldap /etc/ldap/slapd.d /var/log/slapd /run/slapd
-
 if dir_is_empty /etc/ldap/slapd.d; then
     rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
     bootstrap_slapd
-    chown -R openldap:openldap /var/lib/ldap /etc/ldap/slapd.d /var/log/slapd /run/slapd
 fi
 
 LDAP_URLS="ldap:/// ldapi:///"
@@ -75,4 +72,4 @@ if [ "${LDAP_ENABLE_SYSLOG_NG}" = "true" ] && command -v syslog-ng >/dev/null 2>
     syslog-ng --no-caps -F &
 fi
 
-exec slapd -h "${LDAP_URLS}" -u openldap -g openldap -F /etc/ldap/slapd.d -d 0
+exec slapd -h "${LDAP_URLS}" -F /etc/ldap/slapd.d -d 0

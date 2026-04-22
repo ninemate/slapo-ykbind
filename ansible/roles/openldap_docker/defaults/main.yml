@@ -12,12 +12,6 @@ ldap_local_build_context_dir: "{{ ldap_local_artifact_root }}/context"
 ldap_local_image_archive_name: "{{ ldap_image_name | regex_replace('[:/]', '_') }}.tar"
 ldap_local_image_archive: "{{ ldap_local_artifact_root }}/{{ ldap_local_image_archive_name }}"
 ldap_local_build_log: "{{ ldap_local_artifact_root }}/docker-build.log"
-ldap_local_build_async_timeout: 7200
-ldap_local_build_poll_delay: 5
-ldap_local_build_max_polls: 720
-ldap_local_save_async_timeout: 3600
-ldap_local_save_poll_delay: 5
-ldap_local_save_max_polls: 720
 ldap_runtime_dir: "{{ ldap_deploy_root }}/runtime"
 ldap_runtime_ldif_dir: "{{ ldap_runtime_dir }}/ldif"
 ldap_runtime_schema_dir: "{{ ldap_runtime_dir }}/schema"

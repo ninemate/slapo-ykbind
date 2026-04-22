@@ -131,6 +131,9 @@ További fontos, deploy közben gyakran használt változók:
 - `ldap_ports`
 - `ldap_container_base_image`
 - `ldap_docker_build_network`
+- `ldap_skip_local_build`
+- `ldap_skip_local_save`
+- `ldap_ldif_import_file`
 - `ldap_force_password_reset`
 - `ldap_force_full_import`
 - `ldap_enable_syslog_ng`
@@ -173,6 +176,30 @@ Példa távoli hostra:
 cd /home/username/Documents/yubik/ansible
 ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml
 ```
+
+Ha a local image már biztosan elkészült a control node-on, újrafuttatáskor a build kihagyható:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_skip_local_build=true
+```
+
+Ha a local tarball is már létezik és azt is meg akarod tartani:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_skip_local_build=true \
+  -e ldap_skip_local_save=true
+```
+
+Full migrate megjegyzés:
+
+- ha `ldap_ldif_import_file` meg van adva, a role ezt full importként kezeli akkor is, ha a külön `ldap_ldif_import_enabled=true` nincs megadva
+- full import módban a role nem hoz létre default base DN-t és default OU-kat
+- ha a `ldap_base_dn` még az alap `dc=example,dc=org` értéken van, a role megpróbálja az import LDIF első `dn:` sorából levezetni
+- ha az admin DN is még alapértéken van, azt `cn=admin,<derived_base_dn>` formára állítja
 
 ## A deploy által létrehozott target oldali könyvtárak
 

@@ -114,6 +114,7 @@
   register: ldap_base_entry_check
   changed_when: false
   failed_when: false
+  when: not (ldap_full_import_requested | default(false))
 
 - name: Create base DN entry when missing
   ansible.builtin.command:
@@ -131,7 +132,9 @@
       - ldap://127.0.0.1
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/base-entry.ldif"
-  when: "ldap_base_entry_check.rc != 0 or 'dn: ' not in ldap_base_entry_check.stdout"
+  when:
+    - not (ldap_full_import_requested | default(false))
+    - "ldap_base_entry_check.rc != 0 or 'dn: ' not in ldap_base_entry_check.stdout"
 
 - name: Check required OU entries
   ansible.builtin.command:
@@ -158,6 +161,7 @@
   register: ldap_ou_checks
   changed_when: false
   failed_when: false
+  when: not (ldap_full_import_requested | default(false))
 
 - name: Create missing OU entries
   ansible.builtin.command:
@@ -176,7 +180,9 @@
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/ou-{{ item.item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
   loop: "{{ ldap_ou_checks.results }}"
-  when: "item.rc != 0 or 'dn: ' not in item.stdout"
+  when:
+    - not (ldap_full_import_requested | default(false))
+    - "item.rc != 0 or 'dn: ' not in item.stdout"
 
 - name: Check whether bundled YubiKey schema is already loaded
   ansible.builtin.command:

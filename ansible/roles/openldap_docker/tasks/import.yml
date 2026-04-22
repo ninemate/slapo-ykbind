@@ -43,20 +43,20 @@
     that:
       - ldap_ldif_import_file | length > 0
     fail_msg: "A teljes tree import engedélyezett, de a ldap_ldif_import_file nincs megadva."
-  when: ldap_ldif_import_enabled
+  when: ldap_full_import_requested | default(false)
 
 - name: Copy full tree LDIF to target host
   ansible.builtin.copy:
     src: "{{ ldap_ldif_import_file if ldap_ldif_import_file.startswith('/') else repo_root ~ '/' ~ ldap_ldif_import_file }}"
     dest: "{{ ldap_runtime_import_dir }}/full-tree.ldif"
     mode: "0644"
-  when: ldap_ldif_import_enabled
+  when: ldap_full_import_requested | default(false)
 
 - name: Check full tree import marker
   ansible.builtin.stat:
     path: "{{ ldap_full_import_marker }}"
   register: ldap_full_import_marker_stat
-  when: ldap_ldif_import_enabled
+  when: ldap_full_import_requested | default(false)
 
 - name: Check whether the directory already has child entries before full restore
   ansible.builtin.command:
@@ -82,12 +82,12 @@
   register: ldap_full_restore_precheck
   changed_when: false
   failed_when: false
-  when: ldap_ldif_import_enabled and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Stop full restore on non-empty trees unless forced
   ansible.builtin.fail:
     msg: "A teljes tree restore csak üres LDAP tree-re javasolt. Állítsd true-ra a ldap_force_full_import változót, ha felül akarod írni ezt a védelmet."
-  when: "ldap_ldif_import_enabled and not (ldap_full_import_marker_stat.stat.exists | default(false)) and not ldap_force_full_import and 'dn: ' in (ldap_full_restore_precheck.stdout | default(''))"
+  when: "ldap_full_import_requested and not (ldap_full_import_marker_stat.stat.exists | default(false)) and not ldap_force_full_import and 'dn: ' in (ldap_full_restore_precheck.stdout | default(''))"
 
 - name: Import full tree LDIF once
   ansible.builtin.command:
@@ -106,11 +106,11 @@
       - ldap://127.0.0.1
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/imports/full-tree.ldif"
-  when: ldap_ldif_import_enabled and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Mark full tree import as done
   ansible.builtin.file:
     path: "{{ ldap_full_import_marker }}"
     state: touch
     mode: "0644"
-  when: ldap_ldif_import_enabled and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
