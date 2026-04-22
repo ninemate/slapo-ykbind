@@ -130,7 +130,30 @@
   when: (ldap_local_build_result_rc | int) != 0
   run_once: true
 
-- name: Export image tarball on control node
+- name: Inspect local image size before export
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ ldap_image_name }}"
+      - --format
+      - "{{ '{{.Size}}' }}"
+  register: ldap_local_image_size_cmd
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Remove previous local image archive
+  ansible.builtin.file:
+    path: "{{ ldap_local_image_archive }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Start image tarball export on control node
   ansible.builtin.command:
     argv:
       - docker
@@ -138,8 +161,37 @@
       - -o
       - "{{ ldap_local_image_archive }}"
       - "{{ ldap_image_name }}"
-  register: ldap_local_docker_save
-  changed_when: true
+  register: ldap_local_save_async
+  async: "{{ ldap_local_save_async_timeout }}"
+  poll: 0
   delegate_to: localhost
   become: false
+  run_once: true
+
+- name: Initialize local save polling facts
+  ansible.builtin.set_fact:
+    ldap_local_image_expected_size: "{{ ldap_local_image_size_cmd.stdout | int }}"
+    ldap_local_save_finished: false
+    ldap_local_save_prev_size: 0
+    ldap_local_save_result_rc: -1
+  run_once: true
+
+- name: Poll local image export and print progress
+  ansible.builtin.include_tasks: local_save_poll.yml
+  loop: "{{ range(0, ldap_local_save_max_polls | int) | list }}"
+  loop_control:
+    loop_var: save_poll_idx
+  when: not (ldap_local_save_finished | default(false))
+  run_once: true
+
+- name: Fail when local image export did not finish before timeout
+  ansible.builtin.fail:
+    msg: "A docker save nem fejeződött be a megadott időn belül. Archive: {{ ldap_local_image_archive }}"
+  when: not (ldap_local_save_finished | default(false))
+  run_once: true
+
+- name: Fail when local image export returned non-zero
+  ansible.builtin.fail:
+    msg: "A docker save hibával állt le. Archive: {{ ldap_local_image_archive }}"
+  when: (ldap_local_save_result_rc | int) != 0
   run_once: true
