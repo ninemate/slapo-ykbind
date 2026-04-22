@@ -1,0 +1,18 @@
+--- a/servers/slapd/sasl.c
++++ b/servers/slapd/sasl.c
+@@
++#ifdef HAVE_CYRUS_SASL
+ static int
+ slap_sasl_getconfpath( void * context, char ** path )
+ {
+ 	char * sasl_default_configpath;
+ 	size_t len;
+@@
+ 
+ 	return SASL_OK;
+ }
++#endif
+ 
+ int slap_sasl_init( void )
+ {
+ #ifdef HAVE_CYRUS_SASL

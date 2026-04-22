@@ -515,7 +515,7 @@ ykbind_state_modify( Operation *op, ykbind_opctx *ctx )
 	if ( rc != LDAP_SUCCESS ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: schema attributes are not available yet\n",
-			ykbind.on_bi.bi_type, 0, 0 );
+			ykbind.on_bi.bi_type );
 		return rc;
 	}
 
@@ -729,14 +729,14 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	if ( private_uid_bv == NULL || aes_key_bv == NULL ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: YubiKey enabled but secret material missing on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
 	if ( op->orb_cred.bv_len <= YKBIND_OTP_LENGTH ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: credential too short for password+OTP on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -751,7 +751,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	if ( !ykbind_is_modhex( &otp ) ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: malformed modhex OTP for %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -766,7 +766,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	{
 		Debug( LDAP_DEBUG_ANY,
 			"%s: public ID mismatch on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -775,7 +775,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	if ( rc != LDAP_SUCCESS ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: invalid AES key syntax on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -784,7 +784,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	if ( rc != LDAP_SUCCESS ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: failed to decode OTP ciphertext for %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -793,14 +793,14 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	if ( rc != LDAP_SUCCESS ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: AES decrypt failed for %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
 	if ( ykbind_crc16( plaintext, sizeof(plaintext) ) != YKBIND_CRC_OK_RESIDUAL ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: OTP CRC check failed for %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -812,7 +812,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	{
 		Debug( LDAP_DEBUG_ANY,
 			"%s: private UID mismatch on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
@@ -820,7 +820,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	if ( rc != LDAP_SUCCESS ) {
 		Debug( LDAP_DEBUG_ANY,
 			"%s: stored replay state is invalid on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
 		goto deny;
 	}
 
