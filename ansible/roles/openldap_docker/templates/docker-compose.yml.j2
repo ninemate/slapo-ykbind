@@ -9,6 +9,8 @@ services:
       LDAP_ADMIN_DN: {{ ldap_admin_dn | quote }}
       LDAP_ADMIN_PASSWORD: {{ ldap_admin_password | quote }}
       LDAP_ENABLE_LDAPS: {{ (ldap_enable_ldaps | bool) | ternary('true', 'false') | quote }}
+      LDAP_ENABLE_SYSLOG_NG: {{ (ldap_enable_syslog_ng | bool) | ternary('true', 'false') | quote }}
+      LDAP_OPEN_FILES_LIMIT: {{ ldap_open_files_limit | quote }}
       LDAP_TLS_CERT_FILE: {{ ldap_tls_cert_file | quote }}
       LDAP_TLS_KEY_FILE: {{ ldap_tls_key_file | quote }}
       LDAP_TLS_CA_FILE: {{ ldap_tls_ca_file | quote }}
@@ -20,6 +22,10 @@ services:
       NO_PROXY: {{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) | quote }}
     hostname: {{ ldap_container_name }}
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: {{ ldap_open_files_limit }}
+        hard: {{ ldap_open_files_limit }}
     ports:
 {% if ldap_ports | length > 0 %}
 {%   for port_mapping in ldap_ports %}

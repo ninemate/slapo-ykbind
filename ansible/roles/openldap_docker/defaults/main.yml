@@ -57,6 +57,8 @@ ldap_host_packages:
 ldap_module_build_enabled: true
 ldap_enable_ldaps: false
 ldap_force_password_reset: false
+ldap_enable_syslog_ng: false
+ldap_open_files_limit: 1024
 
 ldap_base_object_classes:
   - top

@@ -117,6 +117,8 @@ ldap_ldif_import_file: ""
 ldap_bootstrap_ldif_file: ""
 
 ldap_module_build_enabled: true
+ldap_enable_syslog_ng: false
+ldap_open_files_limit: 1024
 
 ldap_data_dir: /opt/openldap-ykbind/data
 ldap_config_dir: /opt/openldap-ykbind/config
@@ -131,6 +133,8 @@ További fontos, deploy közben gyakran használt változók:
 - `ldap_docker_build_network`
 - `ldap_force_password_reset`
 - `ldap_force_full_import`
+- `ldap_enable_syslog_ng`
+- `ldap_open_files_limit`
 - `ldap_tls_certificate_src`
 - `ldap_tls_private_key_src`
 - `ldap_tls_ca_src`
@@ -348,6 +352,12 @@ A deploy során a role:
 - opcionálisan TLS fájlútvonalakat konfigurál a `cn=config` alatt
 
 Megjegyzés: a `slapd` Debianos inicializálása a `ldap_domain` alapján hozza létre az első suffixet. A legtisztább működéshez a `ldap_domain` és `ldap_base_dn` legyen összhangban.
+
+Konténer-specifikus megjegyzés:
+
+- az `invoke-rc.d ... policy-rc.d denied execution of start` üzenet a bootstrap során várható és önmagában nem hiba
+- a `syslog-ng` alapból ki van kapcsolva, mert Dockerben a capability-kezelés fölösleges zajt okoz
+- a `ldap_open_files_limit` alapból `1024`, mert egyes Debian/OpenLDAP konténeres futásoknál a túl magas `nofile` limit `ch_calloc` crash-t okozhat
 
 ## Ellenőrzés deploy után
 

@@ -6,6 +6,8 @@ LDAP_DOMAIN="${LDAP_DOMAIN:-example.org}"
 LDAP_ORGANIZATION="${LDAP_ORGANIZATION:-Example Organization}"
 LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:-changeme}"
 LDAP_ENABLE_LDAPS="${LDAP_ENABLE_LDAPS:-false}"
+LDAP_ENABLE_SYSLOG_NG="${LDAP_ENABLE_SYSLOG_NG:-false}"
+LDAP_OPEN_FILES_LIMIT="${LDAP_OPEN_FILES_LIMIT:-1024}"
 LDAP_TLS_CERT_FILE="${LDAP_TLS_CERT_FILE:-/etc/ldap/tls/tls.crt}"
 LDAP_TLS_KEY_FILE="${LDAP_TLS_KEY_FILE:-/etc/ldap/tls/tls.key}"
 LDAP_TLS_CA_FILE="${LDAP_TLS_CA_FILE:-/etc/ldap/tls/ca.crt}"
@@ -40,13 +42,14 @@ EOF
 ensure_dir /var/lib/ldap
 ensure_dir /etc/ldap/slapd.d
 ensure_dir /var/log/slapd
+ensure_dir /run/slapd
 
-chown -R openldap:openldap /var/lib/ldap /etc/ldap/slapd.d /var/log/slapd
+chown -R openldap:openldap /var/lib/ldap /etc/ldap/slapd.d /var/log/slapd /run/slapd
 
 if dir_is_empty /etc/ldap/slapd.d; then
     rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
     bootstrap_slapd
-    chown -R openldap:openldap /var/lib/ldap /etc/ldap/slapd.d /var/log/slapd
+    chown -R openldap:openldap /var/lib/ldap /etc/ldap/slapd.d /var/log/slapd /run/slapd
 fi
 
 LDAP_URLS="ldap:/// ldapi:///"
@@ -58,8 +61,18 @@ if [ "${LDAP_ENABLE_LDAPS}" = "true" ]; then
     fi
 fi
 
-if command -v syslog-ng >/dev/null 2>&1; then
-    syslog-ng -F &
+# Work around slapd calloc crashes seen in containers with very high nofile limits.
+# Keeping it explicit here also makes the runtime independent from the host defaults.
+ulimit -n "${LDAP_OPEN_FILES_LIMIT}" || true
+
+if ! slaptest -u -F /etc/ldap/slapd.d >/dev/null 2>&1; then
+    echo "slapd configuration validation failed under /etc/ldap/slapd.d" >&2
+    slaptest -u -F /etc/ldap/slapd.d >&2 || true
+    exit 1
+fi
+
+if [ "${LDAP_ENABLE_SYSLOG_NG}" = "true" ] && command -v syslog-ng >/dev/null 2>&1; then
+    syslog-ng --no-caps -F &
 fi
 
 exec slapd -h "${LDAP_URLS}" -u openldap -g openldap -F /etc/ldap/slapd.d -d 0
