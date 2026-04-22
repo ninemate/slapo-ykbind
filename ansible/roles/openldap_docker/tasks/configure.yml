@@ -43,6 +43,12 @@
     ldap_current_suffix: "{{ (ldap_db_lookup.stdout.split('|'))[1] }}"
     ldap_current_rootdn: "{{ (ldap_db_lookup.stdout.split('|'))[2] }}"
 
+- name: Render overlay config LDIF after database discovery
+  ansible.builtin.template:
+    src: overlay-config.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/overlay-config.ldif"
+    mode: "0644"
+
 - name: Hash admin password for optional rootDN reset
   ansible.builtin.command:
     argv:

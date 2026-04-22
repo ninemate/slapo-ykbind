@@ -80,8 +80,6 @@
       dest: base-entry.ldif
     - src: module-load.ldif.j2
       dest: module-load.ldif
-    - src: overlay-config.ldif.j2
-      dest: overlay-config.ldif
     - src: tls-config.ldif.j2
       dest: tls-config.ldif
 
@@ -91,4 +89,3 @@
     dest: "{{ ldap_runtime_ldif_dir }}/ou-{{ item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
     mode: "0644"
   loop: "{{ ldap_base_ous }}"
-
