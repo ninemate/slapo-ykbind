@@ -62,6 +62,36 @@
   become: false
   run_once: true
 
+- name: Check whether the local image already exists on control node
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ ldap_image_name }}"
+  register: ldap_local_existing_image_check
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Fail when local build is skipped but image is missing
+  ansible.builtin.fail:
+    msg: "A ldap_skip_local_build=true, de a lokális image nem létezik: {{ ldap_image_name }}"
+  when:
+    - ldap_skip_local_build | bool
+    - ldap_local_existing_image_check.rc != 0
+  run_once: true
+
+- name: Announce local image build skip
+  ansible.builtin.debug:
+    msg: "Skipping local docker build because ldap_skip_local_build=true and image {{ ldap_image_name }} already exists."
+  when:
+    - ldap_skip_local_build | bool
+    - ldap_local_existing_image_check.rc == 0
+  run_once: true
+
 - name: Remove previous local docker build log
   ansible.builtin.file:
     path: "{{ ldap_local_build_log }}"
@@ -69,6 +99,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_build | bool)
 
 - name: Start OpenLDAP image build on control node with live log capture
   ansible.builtin.shell: |
@@ -102,6 +133,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_build | bool)
 
 - name: Initialize local build polling facts
   ansible.builtin.set_fact:
@@ -109,26 +141,33 @@
     ldap_local_build_log_line_count: 0
     ldap_local_build_result_rc: -1
   run_once: true
+  when: not (ldap_skip_local_build | bool)
 
 - name: Poll local build and print new output
   ansible.builtin.include_tasks: local_build_poll.yml
   loop: "{{ range(0, ldap_local_build_max_polls | int) | list }}"
   loop_control:
     loop_var: poll_idx
-  when: not (ldap_local_build_finished | default(false))
   run_once: true
+  when:
+    - not (ldap_skip_local_build | bool)
+    - not (ldap_local_build_finished | default(false))
 
 - name: Fail when local docker build did not finish before timeout
   ansible.builtin.fail:
     msg: "A docker build nem fejeződött be a megadott időn belül. Log: {{ ldap_local_build_log }}"
-  when: not (ldap_local_build_finished | default(false))
   run_once: true
+  when:
+    - not (ldap_skip_local_build | bool)
+    - not (ldap_local_build_finished | default(false))
 
 - name: Fail when local docker build returned non-zero
   ansible.builtin.fail:
     msg: "A docker build hibával állt le. Log: {{ ldap_local_build_log }}"
-  when: (ldap_local_build_result_rc | int) != 0
   run_once: true
+  when:
+    - not (ldap_skip_local_build | bool)
+    - (ldap_local_build_result_rc | int) != 0
 
 - name: Inspect local image size before export
   ansible.builtin.command:
@@ -145,6 +184,31 @@
   become: false
   run_once: true
 
+- name: Fail when local save is skipped but archive is missing
+  ansible.builtin.stat:
+    path: "{{ ldap_local_image_archive }}"
+  register: ldap_local_archive_stat
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: ldap_skip_local_save | bool
+
+- name: Announce local image archive export skip
+  ansible.builtin.debug:
+    msg: "Skipping local docker save because ldap_skip_local_save=true and archive {{ ldap_local_image_archive }} already exists."
+  when:
+    - ldap_skip_local_save | bool
+    - ldap_local_archive_stat.stat.exists | default(false)
+  run_once: true
+
+- name: Fail when local save is skipped but archive does not exist
+  ansible.builtin.fail:
+    msg: "A ldap_skip_local_save=true, de a lokális archive nem létezik: {{ ldap_local_image_archive }}"
+  when:
+    - ldap_skip_local_save | bool
+    - not (ldap_local_archive_stat.stat.exists | default(false))
+  run_once: true
+
 - name: Remove previous local image archive
   ansible.builtin.file:
     path: "{{ ldap_local_image_archive }}"
@@ -152,6 +216,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_save | bool)
 
 - name: Start image tarball export on control node
   ansible.builtin.command:
@@ -167,6 +232,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_save | bool)
 
 - name: Initialize local save polling facts
   ansible.builtin.set_fact:
@@ -175,23 +241,30 @@
     ldap_local_save_prev_size: 0
     ldap_local_save_result_rc: -1
   run_once: true
+  when: not (ldap_skip_local_save | bool)
 
 - name: Poll local image export and print progress
   ansible.builtin.include_tasks: local_save_poll.yml
   loop: "{{ range(0, ldap_local_save_max_polls | int) | list }}"
   loop_control:
     loop_var: save_poll_idx
-  when: not (ldap_local_save_finished | default(false))
   run_once: true
+  when:
+    - not (ldap_skip_local_save | bool)
+    - not (ldap_local_save_finished | default(false))
 
 - name: Fail when local image export did not finish before timeout
   ansible.builtin.fail:
     msg: "A docker save nem fejeződött be a megadott időn belül. Archive: {{ ldap_local_image_archive }}"
-  when: not (ldap_local_save_finished | default(false))
   run_once: true
+  when:
+    - not (ldap_skip_local_save | bool)
+    - not (ldap_local_save_finished | default(false))
 
 - name: Fail when local image export returned non-zero
   ansible.builtin.fail:
     msg: "A docker save hibával állt le. Archive: {{ ldap_local_image_archive }}"
-  when: (ldap_local_save_result_rc | int) != 0
   run_once: true
+  when:
+    - not (ldap_skip_local_save | bool)
+    - (ldap_local_save_result_rc | int) != 0

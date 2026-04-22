@@ -40,7 +40,7 @@
 
 - name: Update local save polling facts
   ansible.builtin.set_fact:
-    ldap_local_save_finished: "{{ ldap_local_save_status_result.finished | default(0) | int == 1 }}"
+    ldap_local_save_finished: "{{ ldap_local_save_status_result.finished | default(false) | bool }}"
     ldap_local_save_prev_size: "{{ ldap_local_image_archive_size_cmd.stdout | int }}"
     ldap_local_save_result_rc: "{{ ldap_local_save_status_result.rc | default(-1) }}"
   run_once: true

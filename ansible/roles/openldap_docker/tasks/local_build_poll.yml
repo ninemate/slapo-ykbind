@@ -49,7 +49,7 @@
 
 - name: Update local build polling facts
   ansible.builtin.set_fact:
-    ldap_local_build_finished: "{{ ldap_local_build_status_result.finished | default(0) | int == 1 }}"
+    ldap_local_build_finished: "{{ ldap_local_build_status_result.finished | default(false) | bool }}"
     ldap_local_build_log_line_count: "{{ ldap_local_build_log_line_count_cmd.stdout | int }}"
     ldap_local_build_result_rc: "{{ ldap_local_build_status_result.rc | default(-1) }}"
   run_once: true
