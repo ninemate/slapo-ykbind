@@ -1,0 +1,922 @@
+#include "portable.h"
+
+#include <ac/stdlib.h>
+#include <ac/string.h>
+#include <ac/time.h>
+
+#include <ctype.h>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <stdint.h>
+
+#include "slap.h"
+
+#ifndef LDAP_CONTROL_ASSERT
+#define LDAP_CONTROL_ASSERT "1.3.6.1.1.12"
+#endif
+
+#define YKBIND_OTP_LENGTH 44
+#define YKBIND_PUBLIC_ID_LENGTH 12
+#define YKBIND_AES_KEY_BYTES 16
+#define YKBIND_PRIVATE_UID_BYTES 6
+#define YKBIND_CRC_OK_RESIDUAL 0xF0B8U
+
+typedef struct ykbind_ticket {
+	unsigned char private_uid[YKBIND_PRIVATE_UID_BYTES];
+	uint16_t use_ctr;
+	uint32_t timestamp;
+	uint8_t session_ctr;
+	uint16_t rnd;
+	uint16_t crc;
+} ykbind_ticket;
+
+typedef struct ykbind_opctx {
+	slap_overinst *on;
+	struct berval orig_cred;
+	struct berval stripped_cred;
+	struct berval req_ndn;
+	struct berval req_dn;
+	struct berval otp;
+	char legacy_counter[7];
+	char legacy_timestamp[7];
+	unsigned long use_ctr;
+	unsigned long session_ctr;
+	unsigned long timestamp;
+} ykbind_opctx;
+
+static slap_overinst ykbind;
+
+static const char *ykbind_attr_enabled[] = {
+	"yubiKeyEnabled",
+	NULL
+};
+
+static const char *ykbind_attr_public_id[] = {
+	"yubiKeyPublicId",
+	NULL
+};
+
+static const char *ykbind_attr_private_uid[] = {
+	"yubiKeyPrivateUid",
+	"YKkeyID",
+	NULL
+};
+
+static const char *ykbind_attr_aes_key[] = {
+	"yubiKeyAesKey",
+	"YKaesKey",
+	NULL
+};
+
+static const char *ykbind_attr_last_use_ctr[] = {
+	"yubiKeyLastUseCtr",
+	NULL
+};
+
+static const char *ykbind_attr_last_session_ctr[] = {
+	"yubiKeyLastSessionCtr",
+	NULL
+};
+
+static const char *ykbind_attr_last_timestamp[] = {
+	"yubiKeyLastTimestamp",
+	NULL
+};
+
+static const char *ykbind_attr_legacy_timestamp[] = {
+	"yubiKeyLegacyTimestamp",
+	"YKsessionTimestamp",
+	NULL
+};
+
+static const char *ykbind_attr_legacy_counter[] = {
+	"yubiKeyLastCounter",
+	"YKkeyCounter",
+	NULL
+};
+
+static AttributeDescription *ad_yk_last_use_ctr;
+static AttributeDescription *ad_yk_last_session_ctr;
+static AttributeDescription *ad_yk_last_timestamp;
+static AttributeDescription *ad_yk_legacy_counter;
+static AttributeDescription *ad_yk_legacy_timestamp;
+
+static void
+ykbind_set_backend( Operation *op_target, Operation *op, slap_overinst *on )
+{
+	BackendInfo *bi = op->o_bd->bd_info;
+
+	if ( bi && bi->bi_type &&
+		( bi->bi_type == ykbind.on_bi.bi_type ||
+		strcmp( bi->bi_type, ykbind.on_bi.bi_type ) == 0 ) )
+	{
+		op_target->o_bd->bd_info = (BackendInfo *)on->on_info;
+	}
+}
+
+static int
+ykbind_modhex_value( char c )
+{
+	switch ( c ) {
+	case 'c': return 0x0;
+	case 'b': return 0x1;
+	case 'd': return 0x2;
+	case 'e': return 0x3;
+	case 'f': return 0x4;
+	case 'g': return 0x5;
+	case 'h': return 0x6;
+	case 'i': return 0x7;
+	case 'j': return 0x8;
+	case 'k': return 0x9;
+	case 'l': return 0xA;
+	case 'n': return 0xB;
+	case 'r': return 0xC;
+	case 't': return 0xD;
+	case 'u': return 0xE;
+	case 'v': return 0xF;
+	default:
+		return -1;
+	}
+}
+
+static int
+ykbind_is_modhex( const struct berval *value )
+{
+	ber_len_t i;
+
+	for ( i = 0; i < value->bv_len; i++ ) {
+		if ( ykbind_modhex_value( value->bv_val[i] ) < 0 ) {
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+static int
+ykbind_modhex_decode( const char *input, ber_len_t len, unsigned char *out, ber_len_t out_len )
+{
+	ber_len_t i;
+
+	if ( len % 2 != 0 || out_len != len / 2 ) {
+		return LDAP_PROTOCOL_ERROR;
+	}
+
+	for ( i = 0; i < len; i += 2 ) {
+		int hi = ykbind_modhex_value( input[i] );
+		int lo = ykbind_modhex_value( input[i + 1] );
+
+		if ( hi < 0 || lo < 0 ) {
+			return LDAP_INVALID_SYNTAX;
+		}
+
+		out[i / 2] = (unsigned char)((hi << 4) | lo);
+	}
+
+	return LDAP_SUCCESS;
+}
+
+static void
+ykbind_hex_encode( const unsigned char *src, size_t len, char *dst )
+{
+	static const char hexdigits[] = "0123456789abcdef";
+	size_t i;
+
+	for ( i = 0; i < len; i++ ) {
+		dst[(i * 2)] = hexdigits[(src[i] >> 4) & 0xF];
+		dst[(i * 2) + 1] = hexdigits[src[i] & 0xF];
+	}
+
+	dst[len * 2] = '\0';
+}
+
+static int
+ykbind_hex_decode( const char *src, size_t src_len, unsigned char *dst, size_t dst_len )
+{
+	size_t i;
+
+	if ( src_len != dst_len * 2 ) {
+		return LDAP_INVALID_SYNTAX;
+	}
+
+	for ( i = 0; i < src_len; i += 2 ) {
+		unsigned char hi;
+		unsigned char lo;
+
+		if ( !isxdigit( (unsigned char)src[i] ) ||
+			!isxdigit( (unsigned char)src[i + 1] ) )
+		{
+			return LDAP_INVALID_SYNTAX;
+		}
+
+		hi = (unsigned char)(isdigit( (unsigned char)src[i] ) ?
+			(src[i] - '0') : (tolower( (unsigned char)src[i] ) - 'a' + 10));
+		lo = (unsigned char)(isdigit( (unsigned char)src[i + 1] ) ?
+			(src[i + 1] - '0') : (tolower( (unsigned char)src[i + 1] ) - 'a' + 10));
+		dst[i / 2] = (unsigned char)((hi << 4) | lo);
+	}
+
+	return LDAP_SUCCESS;
+}
+
+static uint16_t
+ykbind_crc16( const unsigned char *data, size_t len )
+{
+	uint16_t crc = 0xFFFFU;
+	size_t i;
+	int bit;
+
+	for ( i = 0; i < len; i++ ) {
+		crc ^= data[i];
+		for ( bit = 0; bit < 8; bit++ ) {
+			if ( crc & 1 ) {
+				crc = (uint16_t)((crc >> 1) ^ 0x8408U);
+			} else {
+				crc >>= 1;
+			}
+		}
+	}
+
+	return crc;
+}
+
+static int
+ykbind_aes_decrypt( const unsigned char *key, const unsigned char *ciphertext, unsigned char *plaintext )
+{
+	EVP_CIPHER_CTX *ctx;
+	int out_len = 0;
+	int final_len = 0;
+	int rc = LDAP_OTHER;
+
+	ctx = EVP_CIPHER_CTX_new();
+	if ( ctx == NULL ) {
+		return rc;
+	}
+
+	if ( EVP_DecryptInit_ex( ctx, EVP_aes_128_ecb(), NULL, key, NULL ) != 1 ) {
+		goto done;
+	}
+
+	EVP_CIPHER_CTX_set_padding( ctx, 0 );
+
+	if ( EVP_DecryptUpdate( ctx, plaintext, &out_len, ciphertext, YKBIND_AES_KEY_BYTES ) != 1 ) {
+		goto done;
+	}
+
+	if ( out_len != YKBIND_AES_KEY_BYTES ) {
+		goto done;
+	}
+
+	if ( EVP_DecryptFinal_ex( ctx, plaintext + out_len, &final_len ) != 1 ) {
+		goto done;
+	}
+
+	if ( out_len + final_len != YKBIND_AES_KEY_BYTES ) {
+		goto done;
+	}
+
+	rc = LDAP_SUCCESS;
+
+done:
+	EVP_CIPHER_CTX_free( ctx );
+	return rc;
+}
+
+static void
+ykbind_parse_ticket( const unsigned char *plain, ykbind_ticket *ticket )
+{
+	memcpy( ticket->private_uid, plain, YKBIND_PRIVATE_UID_BYTES );
+	ticket->use_ctr = (uint16_t)(plain[6] | ((uint16_t)plain[7] << 8));
+	ticket->timestamp = (uint32_t)(plain[8] |
+		((uint32_t)plain[9] << 8) |
+		((uint32_t)plain[10] << 16));
+	ticket->session_ctr = plain[11];
+	ticket->rnd = (uint16_t)(plain[12] | ((uint16_t)plain[13] << 8));
+	ticket->crc = (uint16_t)(plain[14] | ((uint16_t)plain[15] << 8));
+}
+
+static Attribute *
+ykbind_find_attr( Entry *e, const char **names )
+{
+	Attribute *a;
+	int i;
+
+	for ( a = e->e_attrs; a; a = a->a_next ) {
+		for ( i = 0; names[i] != NULL; i++ ) {
+			if ( strcasecmp( a->a_desc->ad_cname.bv_val, names[i] ) == 0 ) {
+				return a;
+			}
+		}
+	}
+
+	return NULL;
+}
+
+static const struct berval *
+ykbind_first_value( Entry *e, const char **names )
+{
+	Attribute *a = ykbind_find_attr( e, names );
+
+	if ( a == NULL || a->a_numvals == 0 ) {
+		return NULL;
+	}
+
+	return &a->a_nvals[0];
+}
+
+static int
+ykbind_attr_is_true( Entry *e, const char **names, int *present )
+{
+	const struct berval *value = ykbind_first_value( e, names );
+	static const struct berval bv_true = BER_BVC( "TRUE" );
+	static const struct berval bv_yes = BER_BVC( "YES" );
+	static const struct berval bv_on = BER_BVC( "ON" );
+	static const struct berval bv_one = BER_BVC( "1" );
+
+	if ( present != NULL ) {
+		*present = (value != NULL);
+	}
+
+	if ( value == NULL ) {
+		return 0;
+	}
+
+	if ( ber_bvstrcasecmp( value, &bv_true ) == 0 ||
+		ber_bvstrcasecmp( value, &bv_yes ) == 0 ||
+		ber_bvstrcasecmp( value, &bv_on ) == 0 ||
+		ber_bvstrcasecmp( value, &bv_one ) == 0 )
+	{
+		return 1;
+	}
+
+	return 0;
+}
+
+static int
+ykbind_parse_ulong_bv( const struct berval *value, int base, unsigned long *out )
+{
+	char buf[64];
+	char *end = NULL;
+	unsigned long tmp;
+
+	if ( value == NULL || value->bv_len == 0 || out == NULL ||
+		value->bv_len >= sizeof(buf) )
+	{
+		return LDAP_INVALID_SYNTAX;
+	}
+
+	memcpy( buf, value->bv_val, value->bv_len );
+	buf[value->bv_len] = '\0';
+
+	tmp = strtoul( buf, &end, base );
+	if ( end == buf || (ber_len_t)(end - buf) != value->bv_len ) {
+		return LDAP_INVALID_SYNTAX;
+	}
+
+	*out = tmp;
+	return LDAP_SUCCESS;
+}
+
+static int
+ykbind_load_previous_state(
+	Entry *e,
+	unsigned long *old_use_ctr,
+	unsigned long *old_session_ctr,
+	unsigned long *old_timestamp )
+{
+	const struct berval *value;
+	int rc;
+
+	*old_use_ctr = 0;
+	*old_session_ctr = 0;
+	*old_timestamp = 0;
+
+	value = ykbind_first_value( e, ykbind_attr_last_use_ctr );
+	if ( value != NULL ) {
+		rc = ykbind_parse_ulong_bv( value, 10, old_use_ctr );
+		if ( rc != LDAP_SUCCESS ) {
+			return rc;
+		}
+	}
+
+	value = ykbind_first_value( e, ykbind_attr_last_session_ctr );
+	if ( value != NULL ) {
+		rc = ykbind_parse_ulong_bv( value, 10, old_session_ctr );
+		if ( rc != LDAP_SUCCESS ) {
+			return rc;
+		}
+	}
+
+	value = ykbind_first_value( e, ykbind_attr_last_timestamp );
+	if ( value != NULL ) {
+		rc = ykbind_parse_ulong_bv( value, 10, old_timestamp );
+		if ( rc != LDAP_SUCCESS ) {
+			return rc;
+		}
+	}
+
+	if ( *old_timestamp == 0 ) {
+		value = ykbind_first_value( e, ykbind_attr_legacy_timestamp );
+		if ( value != NULL ) {
+			rc = ykbind_parse_ulong_bv( value, 16, old_timestamp );
+			if ( rc != LDAP_SUCCESS ) {
+				return rc;
+			}
+		}
+	}
+
+	if ( *old_use_ctr == 0 && *old_session_ctr == 0 ) {
+		value = ykbind_first_value( e, ykbind_attr_legacy_counter );
+		if ( value != NULL ) {
+			unsigned long combined = 0;
+
+			rc = ykbind_parse_ulong_bv( value, 16, &combined );
+			if ( rc != LDAP_SUCCESS ) {
+				return rc;
+			}
+
+			*old_use_ctr = (combined >> 8) & 0xFFFFUL;
+			*old_session_ctr = combined & 0xFFUL;
+		}
+	}
+
+	return LDAP_SUCCESS;
+}
+
+static void
+ykbind_format_legacy_state(
+	const ykbind_ticket *ticket,
+	char legacy_counter[7],
+	char legacy_timestamp[7] )
+{
+	snprintf( legacy_counter, 7, "%04x%02x",
+		(unsigned int)ticket->use_ctr,
+		(unsigned int)ticket->session_ctr );
+	snprintf( legacy_timestamp, 7, "%06x",
+		(unsigned int)(ticket->timestamp & 0xFFFFFFU) );
+}
+
+static int
+ykbind_resolve_ads( void )
+{
+	const char *text = NULL;
+	int rc;
+
+	if ( ad_yk_last_use_ctr == NULL ) {
+		rc = slap_str2ad( "yubiKeyLastUseCtr", &ad_yk_last_use_ctr, &text );
+		if ( rc != LDAP_SUCCESS ) return rc;
+	}
+
+	if ( ad_yk_last_session_ctr == NULL ) {
+		rc = slap_str2ad( "yubiKeyLastSessionCtr", &ad_yk_last_session_ctr, &text );
+		if ( rc != LDAP_SUCCESS ) return rc;
+	}
+
+	if ( ad_yk_last_timestamp == NULL ) {
+		rc = slap_str2ad( "yubiKeyLastTimestamp", &ad_yk_last_timestamp, &text );
+		if ( rc != LDAP_SUCCESS ) return rc;
+	}
+
+	if ( ad_yk_legacy_counter == NULL ) {
+		rc = slap_str2ad( "yubiKeyLastCounter", &ad_yk_legacy_counter, &text );
+		if ( rc != LDAP_SUCCESS ) return rc;
+	}
+
+	if ( ad_yk_legacy_timestamp == NULL ) {
+		rc = slap_str2ad( "YKsessionTimestamp", &ad_yk_legacy_timestamp, &text );
+		if ( rc != LDAP_SUCCESS ) return rc;
+	}
+
+	return LDAP_SUCCESS;
+}
+
+static int
+ykbind_state_modify( Operation *op, ykbind_opctx *ctx )
+{
+	Operation op2 = *op;
+	SlapReply rs2 = { REP_RESULT };
+	BackendInfo *bi = op2.o_bd->bd_info;
+	Modifications m_use = {0};
+	Modifications m_sess = {0};
+	Modifications m_ts = {0};
+	Modifications m_legacy_ctr = {0};
+	Modifications m_legacy_ts = {0};
+	struct berval use_vals[2] = { BER_BVNULL, BER_BVNULL };
+	struct berval sess_vals[2] = { BER_BVNULL, BER_BVNULL };
+	struct berval ts_vals[2] = { BER_BVNULL, BER_BVNULL };
+	struct berval legacy_ctr_vals[2] = { BER_BVNULL, BER_BVNULL };
+	struct berval legacy_ts_vals[2] = { BER_BVNULL, BER_BVNULL };
+	char use_buf[32];
+	char sess_buf[32];
+	char ts_buf[32];
+	int rc;
+
+	rc = ykbind_resolve_ads();
+	if ( rc != LDAP_SUCCESS ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: schema attributes are not available yet\n",
+			ykbind.on_bi.bi_type, 0, 0 );
+		return rc;
+	}
+
+	snprintf( use_buf, sizeof(use_buf), "%lu", ctx->use_ctr );
+	snprintf( sess_buf, sizeof(sess_buf), "%lu", ctx->session_ctr );
+	snprintf( ts_buf, sizeof(ts_buf), "%lu", ctx->timestamp );
+
+	ber_str2bv( use_buf, 0, 0, &use_vals[0] );
+	ber_str2bv( sess_buf, 0, 0, &sess_vals[0] );
+	ber_str2bv( ts_buf, 0, 0, &ts_vals[0] );
+	ber_str2bv( ctx->legacy_counter, 0, 0, &legacy_ctr_vals[0] );
+	ber_str2bv( ctx->legacy_timestamp, 0, 0, &legacy_ts_vals[0] );
+
+	m_use.sml_op = LDAP_MOD_REPLACE;
+	m_use.sml_flags = SLAP_MOD_INTERNAL;
+	m_use.sml_desc = ad_yk_last_use_ctr;
+	m_use.sml_values = use_vals;
+	m_use.sml_nvalues = NULL;
+	m_use.sml_numvals = 1;
+	m_use.sml_next = &m_sess;
+
+	m_sess.sml_op = LDAP_MOD_REPLACE;
+	m_sess.sml_flags = SLAP_MOD_INTERNAL;
+	m_sess.sml_desc = ad_yk_last_session_ctr;
+	m_sess.sml_values = sess_vals;
+	m_sess.sml_nvalues = NULL;
+	m_sess.sml_numvals = 1;
+	m_sess.sml_next = &m_ts;
+
+	m_ts.sml_op = LDAP_MOD_REPLACE;
+	m_ts.sml_flags = SLAP_MOD_INTERNAL;
+	m_ts.sml_desc = ad_yk_last_timestamp;
+	m_ts.sml_values = ts_vals;
+	m_ts.sml_nvalues = NULL;
+	m_ts.sml_numvals = 1;
+	m_ts.sml_next = &m_legacy_ctr;
+
+	m_legacy_ctr.sml_op = LDAP_MOD_REPLACE;
+	m_legacy_ctr.sml_flags = SLAP_MOD_INTERNAL;
+	m_legacy_ctr.sml_desc = ad_yk_legacy_counter;
+	m_legacy_ctr.sml_values = legacy_ctr_vals;
+	m_legacy_ctr.sml_nvalues = NULL;
+	m_legacy_ctr.sml_numvals = 1;
+	m_legacy_ctr.sml_next = &m_legacy_ts;
+
+	m_legacy_ts.sml_op = LDAP_MOD_REPLACE;
+	m_legacy_ts.sml_flags = SLAP_MOD_INTERNAL;
+	m_legacy_ts.sml_desc = ad_yk_legacy_timestamp;
+	m_legacy_ts.sml_values = legacy_ts_vals;
+	m_legacy_ts.sml_nvalues = NULL;
+	m_legacy_ts.sml_numvals = 1;
+	m_legacy_ts.sml_next = NULL;
+
+	op2.o_tag = LDAP_REQ_MODIFY;
+	op2.o_callback = NULL;
+	op2.orm_modlist = &m_use;
+	op2.o_req_dn = ctx->req_dn;
+	op2.o_req_ndn = ctx->req_ndn;
+	op2.o_dn = op->o_bd->be_rootdn;
+	op2.o_ndn = op->o_bd->be_rootndn;
+
+	ykbind_set_backend( &op2, op, ctx->on );
+
+	if ( op->o_bd->be_modify == NULL ) {
+		op2.o_bd->bd_info = bi;
+		return LDAP_UNWILLING_TO_PERFORM;
+	}
+
+	rc = op->o_bd->be_modify( &op2, &rs2 );
+	op2.o_bd->bd_info = bi;
+
+	if ( rc == SLAP_CB_CONTINUE ) {
+		rc = rs2.sr_err;
+	}
+
+	if ( rc == LDAP_SUCCESS ) {
+		rc = rs2.sr_err;
+	}
+
+	return rc;
+}
+
+static void
+ykbind_zero_free_cred( struct berval *bv )
+{
+	if ( bv->bv_val != NULL ) {
+		OPENSSL_cleanse( bv->bv_val, bv->bv_len );
+		ch_free( bv->bv_val );
+		bv->bv_val = NULL;
+		bv->bv_len = 0;
+	}
+}
+
+static int
+ykbind_op_cleanup( Operation *op, SlapReply *rs )
+{
+	slap_callback *cb = op->o_callback;
+	ykbind_opctx *ctx;
+
+	(void)rs;
+
+	if ( cb == NULL ) {
+		return 0;
+	}
+
+	ctx = (ykbind_opctx *)cb->sc_private;
+	op->o_callback = cb->sc_next;
+
+	if ( ctx != NULL ) {
+		op->orb_cred = ctx->orig_cred;
+		ykbind_zero_free_cred( &ctx->stripped_cred );
+		ch_free( ctx );
+	}
+
+	ch_free( cb );
+	return 0;
+}
+
+static int
+ykbind_bind_response( Operation *op, SlapReply *rs )
+{
+	ykbind_opctx *ctx = op->o_callback != NULL ?
+		(ykbind_opctx *)op->o_callback->sc_private : NULL;
+	int rc;
+
+	if ( ctx == NULL ) {
+		return SLAP_CB_CONTINUE;
+	}
+
+	if ( rs->sr_type != REP_RESULT || rs->sr_err != LDAP_SUCCESS ) {
+		return SLAP_CB_CONTINUE;
+	}
+
+	rc = ykbind_state_modify( op, ctx );
+	if ( rc != LDAP_SUCCESS ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: failed to persist YubiKey replay state for %s (%d)\n",
+			ykbind.on_bi.bi_type,
+			ctx->req_ndn.bv_val ? ctx->req_ndn.bv_val : "(unknown)",
+			rc );
+		rs->sr_err = LDAP_OPERATIONS_ERROR;
+		rs->sr_text = "unable to persist YubiKey replay state";
+	}
+
+	return SLAP_CB_CONTINUE;
+}
+
+static int
+ykbind_simple_bind( Operation *op, SlapReply *rs )
+{
+	slap_overinst *on = (slap_overinst *)op->o_bd->bd_info;
+	BackendInfo *bi = op->o_bd->bd_info;
+	Entry *e = NULL;
+	const struct berval *public_id_bv;
+	const struct berval *private_uid_bv;
+	const struct berval *aes_key_bv;
+	struct berval otp = BER_BVNULL;
+	struct berval public_id = BER_BVNULL;
+	struct berval ciphertext_modhex = BER_BVNULL;
+	struct berval password = BER_BVNULL;
+	ykbind_ticket ticket;
+	ykbind_opctx *ctx = NULL;
+	slap_callback *cb = NULL;
+	unsigned char ciphertext[YKBIND_AES_KEY_BYTES];
+	unsigned char plaintext[YKBIND_AES_KEY_BYTES];
+	unsigned char aes_key[YKBIND_AES_KEY_BYTES];
+	unsigned long old_use_ctr = 0;
+	unsigned long old_session_ctr = 0;
+	unsigned long old_timestamp = 0;
+	char private_uid_hex[(YKBIND_PRIVATE_UID_BYTES * 2) + 1];
+	int enabled_present = 0;
+	int require_otp = 0;
+	int rc;
+	static const struct berval bv_nokey = BER_BVC( "NOKEY" );
+
+	if ( op->orb_method != LDAP_AUTH_SIMPLE ) {
+		return SLAP_CB_CONTINUE;
+	}
+
+	if ( BER_BVISEMPTY( &op->o_req_ndn ) ) {
+		return SLAP_CB_CONTINUE;
+	}
+
+	ykbind_set_backend( op, op, on );
+	rc = be_entry_get_rw( op, &op->o_req_ndn, NULL, NULL, 0, &e );
+	op->o_bd->bd_info = bi;
+
+	if ( rc != LDAP_SUCCESS || e == NULL ) {
+		return SLAP_CB_CONTINUE;
+	}
+
+	public_id_bv = ykbind_first_value( e, ykbind_attr_public_id );
+	private_uid_bv = ykbind_first_value( e, ykbind_attr_private_uid );
+	aes_key_bv = ykbind_first_value( e, ykbind_attr_aes_key );
+
+	if ( ykbind_attr_is_true( e, ykbind_attr_enabled, &enabled_present ) ) {
+		require_otp = 1;
+	} else if ( enabled_present ) {
+		require_otp = 0;
+	} else if ( private_uid_bv != NULL && aes_key_bv != NULL &&
+		ber_bvstrcasecmp( private_uid_bv, &bv_nokey ) != 0 )
+	{
+		require_otp = 1;
+	}
+
+	if ( !require_otp ) {
+		be_entry_release_r( op, e );
+		return SLAP_CB_CONTINUE;
+	}
+
+	if ( private_uid_bv == NULL || aes_key_bv == NULL ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: YubiKey enabled but secret material missing on %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	if ( op->orb_cred.bv_len <= YKBIND_OTP_LENGTH ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: credential too short for password+OTP on %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	password.bv_len = op->orb_cred.bv_len - YKBIND_OTP_LENGTH;
+	password.bv_val = ch_malloc( password.bv_len + 1 );
+	memcpy( password.bv_val, op->orb_cred.bv_val, password.bv_len );
+	password.bv_val[password.bv_len] = '\0';
+
+	otp.bv_len = YKBIND_OTP_LENGTH;
+	otp.bv_val = op->orb_cred.bv_val + password.bv_len;
+
+	if ( !ykbind_is_modhex( &otp ) ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: malformed modhex OTP for %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	public_id.bv_val = otp.bv_val;
+	public_id.bv_len = YKBIND_PUBLIC_ID_LENGTH;
+	ciphertext_modhex.bv_val = otp.bv_val + YKBIND_PUBLIC_ID_LENGTH;
+	ciphertext_modhex.bv_len = otp.bv_len - YKBIND_PUBLIC_ID_LENGTH;
+
+	if ( public_id_bv != NULL && public_id_bv->bv_len > 0 &&
+		( public_id_bv->bv_len != public_id.bv_len ||
+		ber_bvstrcasecmp( public_id_bv, &public_id ) != 0 ) )
+	{
+		Debug( LDAP_DEBUG_ANY,
+			"%s: public ID mismatch on %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	rc = ykbind_hex_decode( aes_key_bv->bv_val, aes_key_bv->bv_len,
+		aes_key, sizeof(aes_key) );
+	if ( rc != LDAP_SUCCESS ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: invalid AES key syntax on %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	rc = ykbind_modhex_decode( ciphertext_modhex.bv_val,
+		ciphertext_modhex.bv_len, ciphertext, sizeof(ciphertext) );
+	if ( rc != LDAP_SUCCESS ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: failed to decode OTP ciphertext for %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	rc = ykbind_aes_decrypt( aes_key, ciphertext, plaintext );
+	OPENSSL_cleanse( aes_key, sizeof(aes_key) );
+	if ( rc != LDAP_SUCCESS ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: AES decrypt failed for %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	if ( ykbind_crc16( plaintext, sizeof(plaintext) ) != YKBIND_CRC_OK_RESIDUAL ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: OTP CRC check failed for %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	ykbind_parse_ticket( plaintext, &ticket );
+	ykbind_hex_encode( ticket.private_uid, sizeof(ticket.private_uid), private_uid_hex );
+
+	if ( private_uid_bv->bv_len != strlen( private_uid_hex ) ||
+		strncasecmp( private_uid_bv->bv_val, private_uid_hex, strlen( private_uid_hex ) ) != 0 )
+	{
+		Debug( LDAP_DEBUG_ANY,
+			"%s: private UID mismatch on %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	rc = ykbind_load_previous_state( e, &old_use_ctr, &old_session_ctr, &old_timestamp );
+	if ( rc != LDAP_SUCCESS ) {
+		Debug( LDAP_DEBUG_ANY,
+			"%s: stored replay state is invalid on %s\n",
+			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val, 0 );
+		goto deny;
+	}
+
+	if ( ticket.use_ctr < old_use_ctr ||
+		( ticket.use_ctr == old_use_ctr &&
+		ticket.session_ctr <= old_session_ctr ) )
+	{
+		Debug( LDAP_DEBUG_ANY,
+			"%s: replay detected on %s (stored=%lu/%lu new=%u/%u)\n",
+			ykbind.on_bi.bi_type,
+			op->o_req_ndn.bv_val,
+			old_use_ctr, old_session_ctr,
+			(unsigned int)ticket.use_ctr,
+			(unsigned int)ticket.session_ctr );
+		goto deny;
+	}
+
+	(void)old_timestamp;
+
+	ctx = ch_calloc( 1, sizeof(ykbind_opctx) );
+	cb = ch_calloc( 1, sizeof(slap_callback) );
+	if ( ctx == NULL || cb == NULL ) {
+		goto deny;
+	}
+
+	ykbind_format_legacy_state( &ticket, ctx->legacy_counter, ctx->legacy_timestamp );
+	ctx->on = on;
+	ctx->orig_cred = op->orb_cred;
+	ctx->stripped_cred = password;
+	ctx->req_ndn = op->o_req_ndn;
+	ctx->req_dn = op->o_req_dn;
+	ctx->otp = otp;
+	ctx->use_ctr = ticket.use_ctr;
+	ctx->session_ctr = ticket.session_ctr;
+	ctx->timestamp = ticket.timestamp;
+
+	cb->sc_next = op->o_callback;
+	cb->sc_response = ykbind_bind_response;
+	cb->sc_cleanup = ykbind_op_cleanup;
+	cb->sc_private = ctx;
+	op->o_callback = cb;
+	op->orb_cred = password;
+
+	be_entry_release_r( op, e );
+	OPENSSL_cleanse( plaintext, sizeof(plaintext) );
+	return SLAP_CB_CONTINUE;
+
+deny:
+	if ( e != NULL ) {
+		be_entry_release_r( op, e );
+	}
+	OPENSSL_cleanse( plaintext, sizeof(plaintext) );
+	ykbind_zero_free_cred( &password );
+	if ( cb != NULL ) {
+		ch_free( cb );
+	}
+	if ( ctx != NULL ) {
+		ch_free( ctx );
+	}
+	rs->sr_err = LDAP_INVALID_CREDENTIALS;
+	rs->sr_text = "invalid credentials";
+	send_ldap_result( op, rs );
+	return rs->sr_err;
+}
+
+static int
+ykbind_db_init( BackendDB *be, ConfigReply *cr )
+{
+	(void)be;
+	(void)cr;
+	return LDAP_SUCCESS;
+}
+
+static int
+ykbind_db_destroy( BackendDB *be, ConfigReply *cr )
+{
+	(void)be;
+	(void)cr;
+	return LDAP_SUCCESS;
+}
+
+static int
+ykbind_initialize( void )
+{
+	ykbind.on_bi.bi_type = "ykbind";
+	ykbind.on_bi.bi_db_init = ykbind_db_init;
+	ykbind.on_bi.bi_db_destroy = ykbind_db_destroy;
+	ykbind.on_bi.bi_op_bind = ykbind_simple_bind;
+
+	return overlay_register( &ykbind );
+}
+
+int
+init_module( int argc, char *argv[] )
+{
+	(void)argc;
+	(void)argv;
+	return ykbind_initialize();
+}

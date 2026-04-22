@@ -1,0 +1,13 @@
+dn: cn=yubikey-otp,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: yubikey-otp
+olcAttributeTypes: {0}( 1.3.6.1.4.1.55555.1.1 NAME 'yubiKeyEnabled' DESC 'Enable YubiKey OTP enforcement for simple bind' EQUALITY booleanMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE )
+olcAttributeTypes: {1}( 1.3.6.1.4.1.55555.1.2 NAME 'yubiKeyPublicId' DESC 'YubiKey public ID in modhex' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: {2}( 1.3.6.1.4.1.55555.1.3 NAME ( 'yubiKeyPrivateUid' 'YKkeyID' ) DESC 'YubiKey private UID in 12-char hex form' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: {3}( 1.3.6.1.4.1.55555.1.4 NAME ( 'yubiKeyAesKey' 'YKaesKey' ) DESC 'YubiKey AES key as 32-char hex string' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: {4}( 1.3.6.1.4.1.55555.1.5 NAME 'yubiKeyLastUseCtr' DESC 'Last accepted YubiKey use counter' EQUALITY integerMatch ORDERING integerOrderingMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )
+olcAttributeTypes: {5}( 1.3.6.1.4.1.55555.1.6 NAME 'yubiKeyLastSessionCtr' DESC 'Last accepted YubiKey session counter' EQUALITY integerMatch ORDERING integerOrderingMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )
+olcAttributeTypes: {6}( 1.3.6.1.4.1.55555.1.7 NAME 'yubiKeyLastTimestamp' DESC 'Last accepted YubiKey timestamp' EQUALITY integerMatch ORDERING integerOrderingMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )
+olcAttributeTypes: {7}( 1.3.6.1.4.1.55555.1.8 NAME ( 'yubiKeyLastCounter' 'YKkeyCounter' ) DESC 'Legacy combined use/session counter in hex' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcAttributeTypes: {8}( 1.3.6.1.4.1.55555.1.9 NAME ( 'yubiKeyLegacyTimestamp' 'YKsessionTimestamp' ) DESC 'Legacy YubiKey timestamp in hex' EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE )
+olcObjectClasses: {0}( 1.3.6.1.4.1.55555.2.1 NAME 'yubiKeyTokenAux' DESC 'Auxiliary object class for YubiKey OTP simple bind enforcement' SUP top AUXILIARY MAY ( yubiKeyEnabled $ yubiKeyPublicId $ yubiKeyPrivateUid $ yubiKeyAesKey $ yubiKeyLastUseCtr $ yubiKeyLastSessionCtr $ yubiKeyLastTimestamp $ yubiKeyLastCounter $ yubiKeyLegacyTimestamp ) )

@@ -1,0 +1,3 @@
+dn: olcOverlay=ykbind,olcDatabase={1}mdb,cn=config
+objectClass: olcOverlayConfig
+olcOverlay: ykbind
