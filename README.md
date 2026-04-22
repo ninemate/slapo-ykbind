@@ -44,12 +44,14 @@ Target host:
 
 - Debian-alapú rendszer ajánlott
 - internet vagy működő APT proxy
-- Docker Engine és Docker Compose plugin
+- Debian 12 vagy Debian 13 disztribúciós `docker.io` és `docker-compose` csomagok
 
 Alapértelmezésben a role felteszi a következő host csomagokat Debianon:
 
 - `docker.io`
-- `docker-compose-plugin`
+- `docker-compose`
+
+Megjegyzés: a deploy nem igényli a hivatalos Docker upstream repository használatát, a Debian saját csomagjaira épít.
 
 Ha ezt nem szeretnéd, állítsd `false`-ra a `ldap_manage_host_packages` változót.
 
@@ -335,7 +337,7 @@ Az Ansible smoke tesztek automatikusan lefutnak, de manuálisan ezek a leghaszno
 Konténer állapot:
 
 ```bash
-docker compose -f /opt/openldap-ykbind/docker-compose.yml ps
+docker-compose -f /opt/openldap-ykbind/docker-compose.yml ps
 ```
 
 Admin bind:

@@ -1,9 +1,8 @@
 ---
-- name: Verify docker compose plugin is available
+- name: Verify docker-compose is available
   ansible.builtin.command:
     argv:
-      - docker
-      - compose
+      - docker-compose
       - version
   register: ldap_docker_compose_version
   changed_when: false
@@ -11,8 +10,7 @@
 - name: Build image and start OpenLDAP container
   ansible.builtin.command:
     argv:
-      - docker
-      - compose
+      - docker-compose
       - -f
       - "{{ ldap_compose_file }}"
       - up
@@ -28,4 +26,3 @@
     host: 127.0.0.1
     port: "{{ ldap_listen_port }}"
     timeout: 90
-

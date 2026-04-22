@@ -36,7 +36,7 @@ ldap_proxy_env:
 ldap_manage_host_packages: true
 ldap_host_packages:
   - docker.io
-  - docker-compose-plugin
+  - docker-compose
 
 ldap_module_build_enabled: true
 ldap_enable_ldaps: false
@@ -71,4 +71,3 @@ ldap_smoke_test_user_dn: ""
 
 ldap_full_import_marker: "{{ ldap_data_dir }}/.full-import-done"
 ldap_bootstrap_import_marker: "{{ ldap_data_dir }}/.bootstrap-import-done"
-
