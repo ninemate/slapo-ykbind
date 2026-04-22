@@ -3,12 +3,18 @@ FROM debian:trixie AS builder
 ARG http_proxy=http://proxy.example.net:3128
 ARG https_proxy=http://proxy.example.net:3128
 ARG no_proxy=localhost,127.0.0.1
+ARG HTTP_PROXY=http://proxy.example.net:3128
+ARG HTTPS_PROXY=http://proxy.example.net:3128
+ARG NO_PROXY=localhost,127.0.0.1
 ARG LDAP_MODULE_BUILD_ENABLED=true
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV http_proxy=${http_proxy}
 ENV https_proxy=${https_proxy}
 ENV no_proxy=${no_proxy}
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
 
 COPY noCheckValidUntil /etc/apt/apt.conf.d/noCheckValidUntil
 COPY module/ /usr/src/ykbind/
@@ -40,11 +46,17 @@ FROM debian:trixie
 ARG http_proxy=http://proxy.example.net:3128
 ARG https_proxy=http://proxy.example.net:3128
 ARG no_proxy=localhost,127.0.0.1
+ARG HTTP_PROXY=http://proxy.example.net:3128
+ARG HTTPS_PROXY=http://proxy.example.net:3128
+ARG NO_PROXY=localhost,127.0.0.1
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV http_proxy=${http_proxy}
 ENV https_proxy=${https_proxy}
 ENV no_proxy=${no_proxy}
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
 
 COPY noCheckValidUntil /etc/apt/apt.conf.d/noCheckValidUntil
 COPY syslog-ng.conf /etc/syslog-ng/syslog-ng.conf
