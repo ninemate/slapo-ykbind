@@ -115,6 +115,35 @@ ykbind_set_backend( Operation *op_target, Operation *op, slap_overinst *on )
 }
 
 static int
+ykbind_entry_get( Operation *op, slap_overinst *on, Entry **e )
+{
+	BackendInfo *bi = op->o_bd->bd_info;
+	int rc;
+
+	*e = NULL;
+	ykbind_set_backend( op, op, on );
+	rc = be_entry_get_rw( op, &op->o_req_ndn, NULL, NULL, 0, e );
+	op->o_bd->bd_info = bi;
+
+	return rc;
+}
+
+static void
+ykbind_entry_release( Operation *op, slap_overinst *on, Entry *e )
+{
+	BackendInfo *bi;
+
+	if ( e == NULL ) {
+		return;
+	}
+
+	bi = op->o_bd->bd_info;
+	ykbind_set_backend( op, op, on );
+	be_entry_release_rw( op, e, 0 );
+	op->o_bd->bd_info = bi;
+}
+
+static int
 ykbind_modhex_value( char c )
 {
 	switch ( c ) {
@@ -140,17 +169,79 @@ ykbind_modhex_value( char c )
 }
 
 static int
-ykbind_is_modhex( const struct berval *value )
+ykbind_split_password_otp(
+	Operation *op,
+	const struct berval *cred,
+	struct berval *password,
+	struct berval *otp,
+	const char **reason,
+	ber_len_t *bad_offset )
 {
 	ber_len_t i;
 
-	for ( i = 0; i < value->bv_len; i++ ) {
-		if ( ykbind_modhex_value( value->bv_val[i] ) < 0 ) {
-			return 0;
+	password->bv_val = NULL;
+	password->bv_len = 0;
+	otp->bv_val = NULL;
+	otp->bv_len = 0;
+
+	if ( reason != NULL ) {
+		*reason = "unknown";
+	}
+
+	if ( bad_offset != NULL ) {
+		*bad_offset = (ber_len_t)-1;
+	}
+
+	if ( cred == NULL || BER_BVISNULL( cred ) || cred->bv_val == NULL ) {
+		if ( reason != NULL ) {
+			*reason = "missing credentials";
+		}
+		return LDAP_INVALID_CREDENTIALS;
+	}
+
+	if ( cred->bv_len <= YKBIND_OTP_LENGTH ) {
+		if ( reason != NULL ) {
+			*reason = "credential too short for password+OTP";
+		}
+		return LDAP_INVALID_CREDENTIALS;
+	}
+
+	otp->bv_len = YKBIND_OTP_LENGTH;
+	otp->bv_val = cred->bv_val + cred->bv_len - YKBIND_OTP_LENGTH;
+
+	for ( i = 0; i < otp->bv_len; i++ ) {
+		if ( ykbind_modhex_value( otp->bv_val[i] ) < 0 ) {
+			if ( reason != NULL ) {
+				*reason = "OTP suffix contains non-modhex characters";
+			}
+			if ( bad_offset != NULL ) {
+				*bad_offset = i;
+			}
+			return LDAP_INVALID_CREDENTIALS;
 		}
 	}
 
-	return 1;
+	password->bv_len = cred->bv_len - otp->bv_len;
+	password->bv_val = ch_malloc( password->bv_len + 1 );
+	if ( password->bv_val == NULL ) {
+		if ( reason != NULL ) {
+			*reason = "unable to allocate password buffer";
+		}
+		return LDAP_OTHER;
+	}
+
+	memcpy( password->bv_val, cred->bv_val, password->bv_len );
+	password->bv_val[password->bv_len] = '\0';
+
+	Debug( LDAP_DEBUG_TRACE,
+		"%s: bind credential len=%lu, password len=%lu, otp len=%lu for %s\n",
+		ykbind.on_bi.bi_type,
+		(unsigned long)cred->bv_len,
+		(unsigned long)password->bv_len,
+		(unsigned long)otp->bv_len,
+		op->o_req_ndn.bv_val );
+
+	return LDAP_SUCCESS;
 }
 
 static int
@@ -667,7 +758,6 @@ static int
 ykbind_simple_bind( Operation *op, SlapReply *rs )
 {
 	slap_overinst *on = (slap_overinst *)op->o_bd->bd_info;
-	BackendInfo *bi = op->o_bd->bd_info;
 	Entry *e = NULL;
 	const struct berval *public_id_bv;
 	const struct berval *private_uid_bv;
@@ -688,6 +778,8 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	char private_uid_hex[(YKBIND_PRIVATE_UID_BYTES * 2) + 1];
 	int enabled_present = 0;
 	int require_otp = 0;
+	const char *otp_reason = NULL;
+	ber_len_t otp_bad_offset = (ber_len_t)-1;
 	int rc;
 	static const struct berval bv_nokey = BER_BVC( "NOKEY" );
 
@@ -699,10 +791,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 		return SLAP_CB_CONTINUE;
 	}
 
-	ykbind_set_backend( op, op, on );
-	rc = be_entry_get_rw( op, &op->o_req_ndn, NULL, NULL, 0, &e );
-	op->o_bd->bd_info = bi;
-
+	rc = ykbind_entry_get( op, on, &e );
 	if ( rc != LDAP_SUCCESS || e == NULL ) {
 		return SLAP_CB_CONTINUE;
 	}
@@ -722,7 +811,7 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	}
 
 	if ( !require_otp ) {
-		be_entry_release_r( op, e );
+		ykbind_entry_release( op, on, e );
 		return SLAP_CB_CONTINUE;
 	}
 
@@ -733,25 +822,16 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 		goto deny;
 	}
 
-	if ( op->orb_cred.bv_len <= YKBIND_OTP_LENGTH ) {
+	rc = ykbind_split_password_otp( op, &op->orb_cred, &password, &otp,
+		&otp_reason, &otp_bad_offset );
+	if ( rc != LDAP_SUCCESS ) {
 		Debug( LDAP_DEBUG_ANY,
-			"%s: credential too short for password+OTP on %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
-		goto deny;
-	}
-
-	password.bv_len = op->orb_cred.bv_len - YKBIND_OTP_LENGTH;
-	password.bv_val = ch_malloc( password.bv_len + 1 );
-	memcpy( password.bv_val, op->orb_cred.bv_val, password.bv_len );
-	password.bv_val[password.bv_len] = '\0';
-
-	otp.bv_len = YKBIND_OTP_LENGTH;
-	otp.bv_val = op->orb_cred.bv_val + password.bv_len;
-
-	if ( !ykbind_is_modhex( &otp ) ) {
-		Debug( LDAP_DEBUG_ANY,
-			"%s: malformed modhex OTP for %s\n",
-			ykbind.on_bi.bi_type, op->o_req_ndn.bv_val );
+			"%s: invalid OTP suffix for %s: %s (credential len=%lu, bad offset=%ld)\n",
+			ykbind.on_bi.bi_type,
+			op->o_req_ndn.bv_val,
+			otp_reason ? otp_reason : "unknown",
+			(unsigned long)op->orb_cred.bv_len,
+			(long)otp_bad_offset );
 		goto deny;
 	}
 
@@ -863,14 +943,15 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	cb->sc_private = ctx;
 	op->o_callback = cb;
 	op->orb_cred = password;
+	password = BER_BVNULL;
 
-	be_entry_release_r( op, e );
+	ykbind_entry_release( op, on, e );
 	OPENSSL_cleanse( plaintext, sizeof(plaintext) );
 	return SLAP_CB_CONTINUE;
 
 deny:
 	if ( e != NULL ) {
-		be_entry_release_r( op, e );
+		ykbind_entry_release( op, on, e );
 	}
 	OPENSSL_cleanse( plaintext, sizeof(plaintext) );
 	ykbind_zero_free_cred( &password );
