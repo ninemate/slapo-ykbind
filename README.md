@@ -48,6 +48,13 @@ Megjegyzés: a schema fájlban szereplő `1.3.6.1.4.1.55555.*` OID-ok mintaként
 
 OpenLDAP overlay építéshez nem elég a kliens oldali `libldap-dev`, mert a modul belső `slapd` fejléceket használ. Emiatt a modult **azonos verziójú OpenLDAP forrásfához** kell fordítani, mint ami a célgépen fut.
 
+Ez a repo jelenleg a crash-javított változatot tartalmazza:
+
+- backend-konzisztens entry release
+- robusztusabb OTP suffix-leválasztás
+- részletesebb hibalogok
+- OpenLDAP 2.6 build-kompatibilitási javítás
+
 ### Szükséges csomagok
 
 Debian Bookwormon legalább:
@@ -73,6 +80,12 @@ make OPENLDAP_SRC=/path/to/openldap-* OPENLDAP_BUILD=/path/to/openldap-*
 ```
 
 Ha a célrendszer más OpenLDAP verziót futtat, mindig ahhoz pontosan illeszkedő forrással fordíts.
+
+OpenLDAP `2.5.13` alatt a folyamat ugyanaz. A fontos szabály:
+
+- a `2.5.13`-as `slapd`-hez `2.5.13`-as OpenLDAP forrással fordíts
+- a modul `cn=config` oldalon ugyanúgy tölthető be
+- meglévő adatbázis struktúrát nem kell átalakítani, csak schema + overlay + user attribútumok kerülnek hozzá
 
 ### Telepítés
 
@@ -120,6 +133,35 @@ systemctl restart slapd
 journalctl -u slapd -n 100 --no-pager
 ```
 
+## Meglévő OpenLDAP 2.5.13 adatbázishoz hozzáadás
+
+Ha már van működő `cn=config`-os OpenLDAP adatbázisod, a tipikus sorrend:
+
+1. fordítsd le a modult a pontos `2.5.13` forrásfához
+2. töltsd be a schema-t
+3. töltsd be a modult
+4. add hozzá az overlayt a megfelelő `olcDatabase={N}...` adatbázishoz
+5. add hozzá az ACL-t a YubiKey secret mezők védelmére
+6. userenként add hozzá a `yubiKeyTokenAux` objectClass-t és a YubiKey attribútumokat
+
+Az adatbázis sorszámát így tudod megkeresni:
+
+```bash
+ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -b cn=config '(olcDatabase=*)' dn olcDatabase olcSuffix
+```
+
+Ha például a suffixed `dc=nodomain`, és azt az `olcDatabase={1}mdb,cn=config` kezeli, akkor az overlayt és az ACL-t azon az adatbázison kell módosítani.
+
+## ACL minta
+
+Példa meglévő adatbázisra:
+
+```bash
+ldapmodify -Q -Y EXTERNAL -H ldapi:/// -f examples/acl-yubikey-secrets.ldif
+```
+
+Az [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif) fájlban az `olcDatabase={1}mdb` és az admin DN mintaérték, ezt a saját adatbázisodra kell átírni.
+
 ## Példa user entry
 
 ```ldif
@@ -139,6 +181,108 @@ yubiKeyLastSessionCtr: 0
 yubiKeyLastTimestamp: 0
 yubiKeyLastCounter: 000000
 YKsessionTimestamp: 000000
+```
+
+## Userenkénti bekapcsolás meglévő usereknél
+
+A legegyszerűbb, ha nem új entryt hozol létre, hanem a meglévő userre `modify` művelettel ráteszed a YubiKey objectClass-t és attribútumokat.
+
+Minta:
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f examples/user-enable-template.ldif
+```
+
+A fájl:
+
+- [examples/user-enable-template.ldif](/home/username/Documents/yubik/examples/user-enable-template.ldif)
+
+Mit kell benne személyre szabni:
+
+- `dn`
+- `yubiKeyPublicId`
+- `yubiKeyPrivateUid`
+- `yubiKeyAesKey`
+
+Ha egy usernél átmenetileg ki akarod kapcsolni, de az adatokat megtartanád:
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f examples/user-disable-template.ldif
+```
+
+Ha teljesen le akarod venni a YubiKey mezőket:
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f examples/user-remove-template.ldif
+```
+
+Kapcsolódó minták:
+
+- [examples/user-disable-template.ldif](/home/username/Documents/yubik/examples/user-disable-template.ldif)
+- [examples/user-remove-template.ldif](/home/username/Documents/yubik/examples/user-remove-template.ldif)
+
+## Bulk kulcsfeltöltés meglévő userekhez
+
+A repo tartalmaz egy egyszerű, semicolon-delimited CSV→LDIF generátort meglévő userekhez.
+
+CSV minta:
+
+- [examples/bulk-users-template.csv](/home/username/Documents/yubik/examples/bulk-users-template.csv)
+
+Oszlopok:
+
+- `dn`
+- `public_id`
+- `private_uid_hex`
+- `aes_key_hex`
+- `enabled`
+
+Fontos: a minta **pontosvesszővel** (`;`) elválasztott formátumot használ, mert a DN mező önmagában is vesszőket tartalmaz.
+
+Generálás:
+
+```bash
+chmod +x tools/generate-yubikey-ldif.sh
+tools/generate-yubikey-ldif.sh examples/bulk-users-template.csv > bulk-yubikey-users.ldif
+```
+
+Betöltés:
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=com" -W -f bulk-yubikey-users.ldif
+```
+
+A script:
+
+- [tools/generate-yubikey-ldif.sh](/home/username/Documents/yubik/tools/generate-yubikey-ldif.sh)
+
+A script minden usernél:
+
+- hozzáadja a `yubiKeyTokenAux` objectClass-t
+- beállítja a `yubiKeyEnabled` flaget
+- feltölti a `publicId`, `privateUid`, `aesKey` mezőket
+- nullázza a replay mezőket
+
+Példa saját CSV-re:
+
+```csv
+dn;public_id;private_uid_hex;aes_key_hex;enabled
+uid=alice,ou=people,dc=example,dc=org;cccccccccccb;001122334455;8899aabbccddeeff0011223344556677;TRUE
+uid=test1,ou=people,dc=example,dc=org;cccccccccccb;001122334455;8899aabbccddeeff0011223344556677;FALSE
+```
+
+## Gyors ellenőrzések bulk után
+
+```bash
+ldapsearch -x -LLL -b "ou=people,dc=example,dc=com" '(objectClass=yubiKeyTokenAux)' dn yubiKeyEnabled yubiKeyPublicId
+```
+
+Egy konkrét user secret mezőinek admin oldali ellenőrzése:
+
+```bash
+ldapsearch -x -LLL -D "cn=admin,dc=example,dc=com" -W \
+  -b "uid=alice,ou=People,dc=example,dc=com" '(objectClass=*)' \
+  dn yubiKeyEnabled yubiKeyPublicId yubiKeyPrivateUid yubiKeyAesKey
 ```
 
 ## ACL ajánlás
@@ -179,6 +323,8 @@ Ugyanaz az OTP, de rossz statikus prefix.
 
 Várt eredmény: `Invalid credentials`.
 
+Megjegyzés: ezt valóban csak friss, érvényes OTP-vel lehet lefedni. Dummy modhex stringgel az overlay az OTP hibáján fog elhasalni még a statikus jelszó ellenőrzése előtt.
+
 ### Újrahasznált OTP
 
 Egy már sikeresen elfogadott OTP-t küldj be újra ugyanazzal a felhasználóval.
@@ -197,6 +343,16 @@ Várt eredmény: `Invalid credentials`.
 Ha a credential hossza `<= 44`, nincs benne statikus jelszó prefix.
 
 Várt eredmény: `Invalid credentials`.
+
+### További negatív tesztek
+
+- rossz public ID, de 44 karakteres modhex suffix
+- helyes public ID, de CRC-hibás OTP
+- hibás karakter a suffix közepén vagy végén
+- csak OTP, statikus jelszó nélkül
+- hosszú statikus jelszó + rossz suffix
+
+Várt eredmény minden esetben: `Invalid credentials`, a `slapd` folyamat nem eshet el.
 
 ## Linux login flow
 
@@ -217,3 +373,4 @@ Ha a kliensoldali PAM komponens a jelszót módosítja, feldarabolja, vagy nem s
 3. Nagyon szoros, egyszerre történő párhuzamos bindoknál ugyanazzal az OTP-vel lehet versenyhelyzet, mert a replay állapot ellenőrzése és frissítése nem backend-szintű compare-and-swap tranzakció.
 4. A megoldás YubiKey OTP-t kezel, nem OATH-HOTP/TOTP módot.
 5. A schema példa OID-okkal érkezik; élesítés előtt saját OID-ra érdemes átírni.
+6. A bulk import script egyszerű, pontosvesszővel elválasztott admin inputra készült; idézőjeles/escaped CSV mezőket nem kezel.

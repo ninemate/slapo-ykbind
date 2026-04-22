@@ -1,0 +1,31 @@
+dn: uid=alice,ou=People,dc=example,dc=com
+changetype: modify
+add: objectClass
+objectClass: yubiKeyTokenAux
+-
+replace: yubiKeyEnabled
+yubiKeyEnabled: TRUE
+-
+replace: yubiKeyPublicId
+yubiKeyPublicId: cccjgjgkhcbb
+-
+replace: yubiKeyPrivateUid
+yubiKeyPrivateUid: 001122334455
+-
+replace: yubiKeyAesKey
+yubiKeyAesKey: 8899aabbccddeeff0011223344556677
+-
+replace: yubiKeyLastUseCtr
+yubiKeyLastUseCtr: 0
+-
+replace: yubiKeyLastSessionCtr
+yubiKeyLastSessionCtr: 0
+-
+replace: yubiKeyLastTimestamp
+yubiKeyLastTimestamp: 0
+-
+replace: yubiKeyLastCounter
+yubiKeyLastCounter: 000000
+-
+replace: YKsessionTimestamp
+YKsessionTimestamp: 000000

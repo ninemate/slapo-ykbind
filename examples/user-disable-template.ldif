@@ -1,0 +1,4 @@
+dn: uid=alice,ou=People,dc=example,dc=com
+changetype: modify
+replace: yubiKeyEnabled
+yubiKeyEnabled: FALSE

@@ -943,7 +943,8 @@ ykbind_simple_bind( Operation *op, SlapReply *rs )
 	cb->sc_private = ctx;
 	op->o_callback = cb;
 	op->orb_cred = password;
-	password = BER_BVNULL;
+	password.bv_val = NULL;
+	password.bv_len = 0;
 
 	ykbind_entry_release( op, on, e );
 	OPENSSL_cleanse( plaintext, sizeof(plaintext) );

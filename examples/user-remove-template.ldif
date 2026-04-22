@@ -1,0 +1,20 @@
+dn: uid=alice,ou=People,dc=example,dc=com
+changetype: modify
+replace: yubiKeyEnabled
+yubiKeyEnabled: FALSE
+-
+delete: yubiKeyPublicId
+-
+delete: yubiKeyPrivateUid
+-
+delete: yubiKeyAesKey
+-
+delete: yubiKeyLastUseCtr
+-
+delete: yubiKeyLastSessionCtr
+-
+delete: yubiKeyLastTimestamp
+-
+delete: yubiKeyLastCounter
+-
+delete: YKsessionTimestamp
