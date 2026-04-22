@@ -1,4 +1,4 @@
-FROM debian:bookworm AS builder
+FROM debian:trixie AS builder
 
 ARG http_proxy=http://proxy.example.net:3128
 ARG https_proxy=http://proxy.example.net:3128
@@ -35,7 +35,7 @@ RUN set -eux; \
       install -D -m 0755 ykbind.so /build-out/usr/lib/ldap/ykbind.so; \
     fi
 
-FROM debian:bookworm
+FROM debian:trixie
 
 ARG http_proxy=http://proxy.example.net:3128
 ARG https_proxy=http://proxy.example.net:3128
@@ -69,4 +69,3 @@ VOLUME ["/var/lib/ldap", "/etc/ldap/slapd.d", "/var/log/slapd"]
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 CMD ["/healthcheck.sh"]
 
 ENTRYPOINT ["/entrypoint.sh"]
-

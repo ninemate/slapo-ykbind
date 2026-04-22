@@ -1,19 +1,24 @@
 ---
 ldap_deploy_root: /opt/openldap-ykbind
-ldap_build_context_dir: "{{ ldap_deploy_root }}/build"
+ldap_container_name: openldap-ykbind
+ldap_image_name: openldap-ykbind:latest
+
+ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
+ldap_local_build_context_dir: "{{ ldap_local_artifact_root }}/context"
+ldap_local_image_archive_name: "{{ ldap_image_name | regex_replace('[:/]', '_') }}.tar"
+ldap_local_image_archive: "{{ ldap_local_artifact_root }}/{{ ldap_local_image_archive_name }}"
 ldap_runtime_dir: "{{ ldap_deploy_root }}/runtime"
 ldap_runtime_ldif_dir: "{{ ldap_runtime_dir }}/ldif"
 ldap_runtime_schema_dir: "{{ ldap_runtime_dir }}/schema"
 ldap_runtime_import_dir: "{{ ldap_runtime_ldif_dir }}/imports"
 ldap_tls_host_dir: "{{ ldap_runtime_dir }}/tls"
+ldap_remote_image_dir: "{{ ldap_deploy_root }}/images"
+ldap_remote_image_archive: "{{ ldap_remote_image_dir }}/{{ ldap_local_image_archive_name }}"
 ldap_compose_file: "{{ ldap_deploy_root }}/docker-compose.yml"
 
 ldap_data_dir: "{{ ldap_deploy_root }}/data"
 ldap_config_dir: "{{ ldap_deploy_root }}/config"
 ldap_log_dir: "{{ ldap_deploy_root }}/logs"
-
-ldap_container_name: openldap-ykbind
-ldap_image_name: openldap-ykbind:latest
 
 ldap_domain: example.org
 ldap_base_dn: dc=example,dc=org

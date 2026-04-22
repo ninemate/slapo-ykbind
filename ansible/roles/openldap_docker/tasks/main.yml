@@ -1,4 +1,7 @@
 ---
+- name: Build image on control node
+  ansible.builtin.import_tasks: local_build.yml
+
 - name: Install host prerequisites
   ansible.builtin.import_tasks: prerequisites.yml
 
@@ -19,4 +22,3 @@
 
 - name: Run smoke tests
   ansible.builtin.import_tasks: verify.yml
-

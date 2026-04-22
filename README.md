@@ -3,18 +3,20 @@
 Ez a repository két dolgot ad egyben:
 
 1. egy saját `ykbind` OpenLDAP overlay modult YubiKey OTP ellenőrzéssel
-2. egy teljes, Ansible-alapú, Dockeres deploy megoldást Debian 12 alapú OpenLDAP szerverhez
+2. egy teljes, Ansible-alapú, Dockeres deploy megoldást Debian 13 alapú OpenLDAP szerverhez
 
-A cél a "one click" deploy: egyetlen playbook futtatása hozza létre a build contextet, buildeli az image-et, elindítja a konténert, betölti a schema/modul/overlay konfigurációt, felépíti az LDAP tree alapját, opcionálisan importál LDIF-et, majd smoke teszteket futtat.
+A cél a "one click" deploy: egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et, tarballként áttölti az LDAP VM-re, elindítja a konténert, betölti a schema/modul/overlay konfigurációt, felépíti az LDAP tree alapját, opcionálisan importál LDIF-et, majd smoke teszteket futtat.
 
 ## Mit csinál a playbook
 
 Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansible/playbooks/deploy-openldap.yml) futtatása:
 
-- létrehozza a target hoston a deploy könyvtárakat
-- kirakja a Docker build contextet
-- Debian 12 alapú image-et buildel a [docker/openldap/Dockerfile](/home/username/Documents/yubik/docker/openldap/Dockerfile) alapján
+- a control node-on létrehozza a Docker build contextet
+- Debian 13 alapú image-et buildel a [docker/openldap/Dockerfile](/home/username/Documents/yubik/docker/openldap/Dockerfile) alapján
 - a meglévő `slapo-ykbind.c` modult multi-stage buildben lefordítja
+- a kész image-et `docker save`-val exportálja
+- átmásolja az image tarballt a cél hostra és `docker load`-dal betölti
+- létrehozza a target hoston a deploy könyvtárakat
 - elindítja a konténert Docker Compose-szal
 - inicializálja a slapd adatbázist az [docker/openldap/entrypoint.sh](/home/username/Documents/yubik/docker/openldap/entrypoint.sh) segítségével
 - betölti a `yubikey-otp` schema-t
@@ -37,6 +39,7 @@ Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansibl
 Control node:
 
 - Ansible telepítve
+- működő lokális Docker daemon és `docker` CLI
 - SSH elérés a target hostra
 - jog a target hoston `become` használatára
 
@@ -98,6 +101,7 @@ ldap_admin_password: changeme
 
 ldap_container_name: openldap-ykbind
 ldap_image_name: openldap-ykbind:latest
+ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
 
 ldap_http_proxy: http://proxy.example.net:3128
 ldap_https_proxy: http://proxy.example.net:3128
@@ -171,15 +175,21 @@ Alapértelmezett root:
 /opt/openldap-ykbind
 ```
 
-Fontos alkönyvtárak:
+Fontos alkönyvtárak a target hoston:
 
-- `build/`: Docker build context
+- `images/`: a control node-ról átmásolt image tarball
 - `runtime/ldif/`: generált LDIF-ek
 - `runtime/schema/`: schema LDIF-ek
 - `runtime/tls/`: opcionális TLS fájlok
 - `data/`: LDAP adat perzisztencia
 - `config/`: `cn=config` perzisztencia
 - `logs/`: log perzisztencia
+
+Lokális control node build artifactok alapértelmezett helye:
+
+```text
+/tmp/openldap-ykbind-artifacts
+```
 
 ## Full tree export meglévő LDAP-ból
 
@@ -295,18 +305,20 @@ Az image build nem csak bemásolja a modult, hanem ténylegesen le is fordítja.
 
 Fő pontok:
 
-- Debian 12 alapú multi-stage Docker build
+- Debian 13 alapú multi-stage Docker build
 - `apt-get build-dep openldap`
 - `apt-get source openldap`
 - a repositoryban lévő [Makefile](/home/username/Documents/yubik/Makefile) fut
 - a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
+- a kész image a control node-on tarballként exportálódik
+- a tarball a cél LDAP hostra kerül és ott `docker load` importálja
 - a playbook utána betölti a modult a `cn=module{0},cn=config` alá
 - végül felveszi az overlayt a fő adatbázisra
 
-Ha kézzel akarod debugolni a buildet, a legegyszerűbb a target hoston az Ansible által kirakott build contextet használni:
+Ha kézzel akarod debugolni a buildet, a legegyszerűbb a control node-on az Ansible által kirakott build contextet használni:
 
 ```bash
-docker build -t openldap-ykbind:debug /opt/openldap-ykbind/build
+docker build -t openldap-ykbind:debug /tmp/openldap-ykbind-artifacts/context
 ```
 
 Deploy oldalon a modul buildje kikapcsolható:

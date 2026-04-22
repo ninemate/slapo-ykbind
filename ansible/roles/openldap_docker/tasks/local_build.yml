@@ -1,0 +1,99 @@
+---
+- name: Create local image build directories on control node
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ldap_local_artifact_root }}"
+    - "{{ ldap_local_build_context_dir }}"
+    - "{{ ldap_local_build_context_dir }}/module"
+    - "{{ ldap_local_build_context_dir }}/module/patches"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Copy Docker build assets to control node
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - src: "{{ repo_root }}/docker/openldap/Dockerfile"
+      dest: "{{ ldap_local_build_context_dir }}/Dockerfile"
+    - src: "{{ repo_root }}/docker/openldap/entrypoint.sh"
+      dest: "{{ ldap_local_build_context_dir }}/entrypoint.sh"
+      mode: "0755"
+    - src: "{{ role_path }}/files/noCheckValidUntil"
+      dest: "{{ ldap_local_build_context_dir }}/noCheckValidUntil"
+    - src: "{{ role_path }}/files/syslog-ng.conf"
+      dest: "{{ ldap_local_build_context_dir }}/syslog-ng.conf"
+    - src: "{{ role_path }}/files/healthcheck.sh"
+      dest: "{{ ldap_local_build_context_dir }}/healthcheck.sh"
+      mode: "0755"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Copy overlay module source files to local build context
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - src: "{{ repo_root }}/Makefile"
+      dest: "{{ ldap_local_build_context_dir }}/module/Makefile"
+    - src: "{{ repo_root }}/slapo-ykbind.c"
+      dest: "{{ ldap_local_build_context_dir }}/module/slapo-ykbind.c"
+    - src: "{{ repo_root }}/patches/openldap-2.6.10-sasl-getconfpath-guard.patch"
+      dest: "{{ ldap_local_build_context_dir }}/module/patches/openldap-2.6.10-sasl-getconfpath-guard.patch"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Verify Docker is available on control node
+  ansible.builtin.command:
+    argv:
+      - docker
+      - version
+  register: ldap_local_docker_version
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Build OpenLDAP image on control node
+  ansible.builtin.command:
+    argv:
+      - docker
+      - build
+      - -t
+      - "{{ ldap_image_name }}"
+      - --build-arg
+      - "http_proxy={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
+      - --build-arg
+      - "https_proxy={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
+      - --build-arg
+      - "no_proxy={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
+      - --build-arg
+      - "LDAP_MODULE_BUILD_ENABLED={{ (ldap_module_build_enabled | bool) | ternary('true', 'false') }}"
+      - "{{ ldap_local_build_context_dir }}"
+  register: ldap_local_docker_build
+  changed_when: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Export image tarball on control node
+  ansible.builtin.command:
+    argv:
+      - docker
+      - save
+      - -o
+      - "{{ ldap_local_image_archive }}"
+      - "{{ ldap_image_name }}"
+  register: ldap_local_docker_save
+  changed_when: true
+  delegate_to: localhost
+  become: false
+  run_once: true

@@ -7,7 +7,34 @@
   register: ldap_docker_compose_version
   changed_when: false
 
-- name: Build image and start OpenLDAP container
+- name: Copy prebuilt image archive to target host
+  ansible.builtin.copy:
+    src: "{{ ldap_local_image_archive }}"
+    dest: "{{ ldap_remote_image_archive }}"
+    mode: "0644"
+  register: ldap_remote_image_archive_copy
+
+- name: Check whether the image already exists on target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ ldap_image_name }}"
+  register: ldap_remote_image_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Load prebuilt image on target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - load
+      - -i
+      - "{{ ldap_remote_image_archive }}"
+  when: ldap_remote_image_archive_copy.changed or ldap_remote_image_inspect.rc != 0
+
+- name: Start OpenLDAP container from prebuilt image
   ansible.builtin.command:
     argv:
       - docker-compose
@@ -15,7 +42,6 @@
       - "{{ ldap_compose_file }}"
       - up
       - -d
-      - --build
       - --remove-orphans
     chdir: "{{ ldap_deploy_root }}"
   register: ldap_compose_up
