@@ -44,9 +44,13 @@ ensure_dir /etc/ldap/slapd.d
 ensure_dir /var/log/slapd
 ensure_dir /run/slapd
 
-if dir_is_empty /etc/ldap/slapd.d; then
-    rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
-    bootstrap_slapd
+if [ "${LDAP_SKIP_INIT:-false}" = "true" ]; then
+    echo "LDAP init skipped (LDAP_SKIP_INIT=true)"
+else
+    if dir_is_empty /etc/ldap/slapd.d; then
+        rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
+        bootstrap_slapd
+    fi
 fi
 
 LDAP_URLS="ldap:/// ldapi:///"

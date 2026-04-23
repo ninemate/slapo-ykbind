@@ -89,6 +89,96 @@
       - "{{ ldap_container_bootstrap_dir }}/ldif/database-config.ldif"
   when:
     - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+- name: Start LDAP container temporarily for schema setup
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - /opt/openldap-ykbind/docker-compose.yml
+      - up
+      - -d
+
+- name: Wait for ldapi
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - openldap-ykbind
+      - ldapwhoami
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+  register: ldapwhoami
+  retries: 20
+  delay: 3
+  until: ldapwhoami.rc == 0
+  changed_when: false
+
+
+- name: Import schema LDIFs using migration image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --volumes-from
+      - openldap-ykbind
+      - openldap-ykbind:migrate
+      - ldapadd
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "/opt/openldap/bootstrap/schema/{{ item }}"
+  loop: "{{ ldap_additional_schema_ldifs }}"
+
+- name: Stop OpenLDAP container before slapadd
+  ansible.builtin.command:
+    argv:
+      - docker
+      - stop
+      - openldap-ykbind
+
+- name: Wipe LDAP data db before slapadd
+  ansible.builtin.command:
+    argv:
+      - rm
+      - -rf
+      - /opt/openldap-ykbind/data/*
+
+- name: Import full tree LDIF (offline slapadd) using migration image
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --volumes-from
+      - openldap-ykbind
+      - openldap-ykbind:migrate
+      - slapadd
+      - -n
+      - "1"
+      - -l
+      - /opt/openldap/bootstrap/ldif/imports/full-tree.ldif
+
+- name: Fix LDAP DB ownership after slapadd
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --volumes-from
+      - openldap-ykbind
+      - openldap-ykbind:migrate
+      - chown
+      - -R
+      - openldap:openldap
+      - /var/lib/ldap
 
 - name: Check whether the base DN already exists
   ansible.builtin.command:
@@ -203,6 +293,7 @@
       - dn
   register: ldap_yubikey_schema_check
   changed_when: false
+  failed_when: false   # nagyon fontos LDAP-nál
 
 - name: Import bundled YubiKey schema into cn=config
   ansible.builtin.command:
@@ -218,7 +309,11 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/schema/yubikey-otp.ldif"
-  when: "'dn: ' not in ldap_yubikey_schema_check.stdout"
+  register: ykbind_schema_import
+  failed_when:
+    - ykbind_schema_import.rc != 0
+    - "'Duplicate attributeType' not in ykbind_schema_import.stderr"
+
 
 - name: Check optional extra schema LDIF files
   ansible.builtin.command:
@@ -258,6 +353,47 @@
       - "{{ ldap_container_bootstrap_dir }}/schema/{{ item.item | basename }}"
   loop: "{{ ldap_extra_schema_checks.results | default([]) }}"
   when: "'dn: ' not in item.stdout"
+
+- name: Check whether olcModulePath is set
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - cn=module{0},cn=config
+      - -s
+      - base
+      - olcModulePath
+  register: ldap_module_path_check
+  changed_when: false
+  failed_when: false
+  when: ldap_module_build_enabled
+
+- name: Ensure olcModulePath exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/module-path-add.ldif"
+  when:
+    - ldap_module_build_enabled
+    - ldap_module_path_check.stdout | trim == ""
 
 - name: Check whether ykbind module is already loaded
   ansible.builtin.command:

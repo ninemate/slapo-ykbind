@@ -1,3 +1,28 @@
 ---
 ldap_manage_host_packages: true
+ldap_base_dn: dc=example,dc=org
+ldap_domain: example.org
+ldap_organization: Example Organization
+ldap_admin_dn: cn=admin,dc=example,dc=org
+ldap_admin_password: <redacted-admin-password>
 
+ldap_container_name: openldap-ykbind
+ldap_image_name: openldap-ykbind:latest
+
+ldap_http_proxy: http://proxy.example.net:3128
+ldap_https_proxy: http://proxy.example.net:3128
+ldap_no_proxy: localhost,127.0.0.1
+
+ldap_listen_port: 389
+ldap_ldaps_port: 636
+ldap_enable_ldaps: true
+
+  #ldap_ldif_import_enabled: true
+  #ldap_ldif_import_file: ""
+  #ldap_bootstrap_ldif_file: ""
+
+ldap_module_build_enabled: true
+
+ldap_data_dir: /opt/openldap-ykbind/data
+ldap_config_dir: /opt/openldap-ykbind/config
+ldap_log_dir: /opt/openldap-ykbind/logs

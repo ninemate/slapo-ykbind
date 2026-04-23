@@ -18,18 +18,31 @@ ENV HTTP_PROXY=${HTTP_PROXY}
 ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
 
+RUN printf '%s\n' \
+  'Acquire::Retries "10";' \
+  'Acquire::http::Timeout "60";' \
+  'Acquire::https::Timeout "60";' \
+  'Acquire::http::Pipeline-Depth "0";' \
+  'Acquire::https::Pipeline-Depth "0";' \
+  'Acquire::http::No-Cache "true";' \
+  'Acquire::https::No-Cache "true";' \
+  'Acquire::Languages "none";' \
+  'Acquire::PDiffs "false";' \
+  'Acquire::ForceIPv4 "true";' \
+  > /etc/apt/apt.conf.d/99-proxy-safe
+
 COPY noCheckValidUntil /etc/apt/apt.conf.d/noCheckValidUntil
 
 RUN set -eux; \
     sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources; \
     apt-get -y update; \
+    apt-get -y install --no-install-recommends ca-certificates && \
+    apt-get -y install --no-install-recommends file && \
+    apt-get -y install --no-install-recommends build-essential && \
+    apt-get -y install --no-install-recommends libssl-dev && \
+    apt-get -y install --no-install-recommends libsasl2-dev libldap-dev && \
     apt-get -y install --no-install-recommends \
-      build-essential \
-      ca-certificates \
       dpkg-dev \
-      libldap-dev \
-      libsasl2-dev \
-      libssl-dev \
       patch \
       pkg-config; \
     if [ "${LDAP_MODULE_BUILD_ENABLED}" = "true" ]; then \
@@ -55,7 +68,9 @@ RUN set -eux; \
         builddir="/usr/src/openldap-build"; \
         mkdir -p "${builddir}"; \
         cd "${builddir}"; \
-        "${srcdir}/configure"; \
+        "${srcdir}/configure"; \        
+        make depend; \
+        make -C include; \
       fi; \
       if [ ! -f "${builddir}/ldap_config.h" ] && [ ! -f "${builddir}/include/ldap_config.h" ]; then \
         echo "ldap_config.h not found under ${builddir}" >&2; \
@@ -93,7 +108,8 @@ RUN set -eux; \
     echo "slapd slapd/no_configuration boolean true" | debconf-set-selections; \
     apt-get -y update; \
     apt-get -y install --no-install-recommends telnet tcpdump vim net-tools procps openssh-client; \
-    apt-get -y install --no-install-recommends slapd ldap-utils syslog-ng logrotate ca-certificates; \
+    apt-get -y install --no-install-recommends slapd ldap-utils logrotate ca-certificates; \
+    apt-get -y install -o Dpkg::Options::="--force-confold" syslog-ng; \
     rm -rf /var/lib/apt/lists/*; \
     mkdir -p /opt/openldap/bootstrap /var/log/slapd; \
     chmod +x /entrypoint.sh /healthcheck.sh

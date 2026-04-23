@@ -89,23 +89,71 @@
     msg: "A teljes tree restore csak üres LDAP tree-re javasolt. Állítsd true-ra a ldap_force_full_import változót, ha felül akarod írni ezt a védelmet."
   when: "ldap_full_import_requested and not (ldap_full_import_marker_stat.stat.exists | default(false)) and not ldap_force_full_import and 'dn: ' in (ldap_full_restore_precheck.stdout | default(''))"
 
-- name: Import full tree LDIF once
+    #- name: Import full tree LDIF once
+    #  ansible.builtin.command:
+    #    argv:
+    #      - docker
+    #      - exec
+    #      - "{{ ldap_container_name }}"
+    #      - ldapadd
+    #      - -c
+    #      - -x
+    #      - -D
+    #      - "{{ ldap_admin_dn }}"
+    #      - -w
+    #      - "{{ ldap_admin_password }}"
+    #      - -H
+    #      - ldap://127.0.0.1
+    #      - -f
+    #      - "{{ ldap_container_bootstrap_dir }}/ldif/imports/full-tree.ldif"
+    #  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+
+- name: Stop OpenLDAP container before full tree restore
+  ansible.builtin.command:
+    argv:
+      - docker
+      - stop
+      - "{{ ldap_container_name }}"
+  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+
+- name: Import full tree LDIF with slapadd (offline, correct entrypoint)
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --entrypoint
+      - slapadd
+      - --volumes-from
+      - "{{ ldap_container_name }}"
+      - "{{ ldap_image_name }}"
+      - -n
+      - "1"
+      - -l
+      - "{{ ldap_container_bootstrap_dir }}/ldif/imports/full-tree.ldif"
+  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+
+- name: Fix LDAP DB ownership after slapadd
   ansible.builtin.command:
     argv:
       - docker
       - exec
       - "{{ ldap_container_name }}"
-      - ldapadd
-      - -c
-      - -x
-      - -D
-      - "{{ ldap_admin_dn }}"
-      - -w
-      - "{{ ldap_admin_password }}"
-      - -H
-      - ldap://127.0.0.1
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/ldif/imports/full-tree.ldif"
+      - chown
+      - -R
+      - openldap:openldap
+      - /var/lib/ldap
+  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+
+- name: Start slapd after full tree restore
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - service
+      - slapd
+      - start
   when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Mark full tree import as done

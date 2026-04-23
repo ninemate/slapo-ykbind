@@ -1,0 +1,3 @@
+# LDAP migration artifacts (NE kerüljenek Gitbe)
+schema/schema.ldif
+exports/full-tree.ldif
