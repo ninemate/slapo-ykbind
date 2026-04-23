@@ -11,6 +11,11 @@ LDAP_OPEN_FILES_LIMIT="${LDAP_OPEN_FILES_LIMIT:-1024}"
 LDAP_TLS_CERT_FILE="${LDAP_TLS_CERT_FILE:-/etc/ldap/tls/tls.crt}"
 LDAP_TLS_KEY_FILE="${LDAP_TLS_KEY_FILE:-/etc/ldap/tls/tls.key}"
 LDAP_TLS_CA_FILE="${LDAP_TLS_CA_FILE:-/etc/ldap/tls/ca.crt}"
+LDAP_INIT_MODE="${LDAP_INIT_MODE:-fresh}"
+
+if [ "${LDAP_SKIP_INIT:-false}" = "true" ]; then
+    LDAP_INIT_MODE="disabled"
+fi
 
 ensure_dir() {
     mkdir -p "$1"
@@ -44,13 +49,37 @@ ensure_dir /etc/ldap/slapd.d
 ensure_dir /var/log/slapd
 ensure_dir /run/slapd
 
-if [ "${LDAP_SKIP_INIT:-false}" = "true" ]; then
-    echo "LDAP init skipped (LDAP_SKIP_INIT=true)"
+if dir_is_empty /etc/ldap/slapd.d; then
+    case "${LDAP_INIT_MODE}" in
+        fresh)
+            rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
+            bootstrap_slapd
+            ;;
+        config-only)
+            rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
+            bootstrap_slapd
+            rm -rf /var/lib/ldap/*
+            echo "OpenLDAP config initialized without directory data (LDAP_INIT_MODE=config-only)."
+            ;;
+        disabled)
+            echo "LDAP init disabled, but /etc/ldap/slapd.d is empty." >&2
+            echo "Provide an existing cn=config volume or use LDAP_INIT_MODE=fresh/config-only." >&2
+            exit 1
+            ;;
+        *)
+            echo "Unsupported LDAP_INIT_MODE=${LDAP_INIT_MODE}; expected fresh, config-only or disabled." >&2
+            exit 1
+            ;;
+    esac
 else
-    if dir_is_empty /etc/ldap/slapd.d; then
-        rm -rf /var/lib/ldap/* /etc/ldap/slapd.d/*
-        bootstrap_slapd
-    fi
+    case "${LDAP_INIT_MODE}" in
+        fresh|config-only|disabled)
+            ;;
+        *)
+            echo "Unsupported LDAP_INIT_MODE=${LDAP_INIT_MODE}; expected fresh, config-only or disabled." >&2
+            exit 1
+            ;;
+    esac
 fi
 
 LDAP_URLS="ldap:/// ldapi:///"

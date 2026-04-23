@@ -1,8 +1,8 @@
 ---
 ldap_container_bootstrap_dir: /opt/openldap/bootstrap
+ldap_container_config_import_dir: "{{ ldap_container_bootstrap_dir }}/ldif/config-imports"
 ldap_container_module_dir: /usr/lib/ldap
 ldap_container_module_name: ykbind.so
 ldap_container_schema_name: yubikey-otp
 ldap_container_schema_file: "{{ ldap_container_bootstrap_dir }}/schema/yubikey-otp.ldif"
 ldap_container_tls_dir: /etc/ldap/tls
-

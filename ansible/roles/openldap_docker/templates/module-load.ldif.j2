@@ -1,4 +1,7 @@
 dn: cn=module{0},cn=config
 changetype: modify
+replace: olcModulePath
+olcModulePath: {{ ldap_container_module_dir }}
+-
 add: olcModuleLoad
 olcModuleLoad: {{ ldap_container_module_name }}

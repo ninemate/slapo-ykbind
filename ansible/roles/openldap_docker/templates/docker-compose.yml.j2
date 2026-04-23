@@ -8,6 +8,7 @@ services:
       LDAP_ORGANIZATION: {{ ldap_organization | quote }}
       LDAP_ADMIN_DN: {{ ldap_admin_dn | quote }}
       LDAP_ADMIN_PASSWORD: {{ ldap_admin_password | quote }}
+      LDAP_INIT_MODE: {{ ldap_effective_init_mode | quote }}
       LDAP_ENABLE_LDAPS: {{ (ldap_enable_ldaps | bool) | ternary('true', 'false') | quote }}
       LDAP_ENABLE_SYSLOG_NG: {{ (ldap_enable_syslog_ng | bool) | ternary('true', 'false') | quote }}
       LDAP_OPEN_FILES_LIMIT: {{ ldap_open_files_limit | quote }}

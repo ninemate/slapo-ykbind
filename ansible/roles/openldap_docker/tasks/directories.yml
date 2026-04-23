@@ -8,6 +8,7 @@
     - "{{ ldap_deploy_root }}"
     - "{{ ldap_runtime_dir }}"
     - "{{ ldap_runtime_ldif_dir }}"
+    - "{{ ldap_runtime_config_import_dir }}"
     - "{{ ldap_runtime_schema_dir }}"
     - "{{ ldap_runtime_import_dir }}"
     - "{{ ldap_remote_image_dir }}"

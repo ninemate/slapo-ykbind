@@ -140,31 +140,6 @@
   when: not (ldap_skip_local_save | bool)
   run_once: true
 
-- name: Create migration-only Dockerfile
-  ansible.builtin.copy:
-    dest: /tmp/openldap-ykbind-artifacts/context/Dockerfile.migrate
-    content: |
-      FROM openldap-ykbind:latest
-      ENTRYPOINT []
-      CMD ["/bin/sh"]
-  delegate_to: localhost
-  become: false
-  run_once: true
-
-- name: Build migration-only OpenLDAP image on control node
-  ansible.builtin.command:
-    argv:
-      - docker
-      - build
-      - -f
-      - /tmp/openldap-ykbind-artifacts/context/Dockerfile.migrate
-      - -t
-      - openldap-ykbind:migrate
-      - /tmp/openldap-ykbind-artifacts/context
-  delegate_to: localhost
-  become: false
-  run_once: true
-
 - name: Inspect local image size before export
   ansible.builtin.command:
     argv:
@@ -228,32 +203,6 @@
   become: false
   run_once: true
   when: not (ldap_skip_local_save | bool)
-
-- name: Save migration image to tarball on control node
-  ansible.builtin.command:
-    argv:
-      - docker
-      - save
-      - openldap-ykbind:migrate
-      - -o
-      - /tmp/openldap-ykbind-artifacts/openldap-ykbind_migrate.tar
-  delegate_to: localhost
-  become: false
-  run_once: true
-
-- name: Copy migration image archive to target host
-  ansible.builtin.copy:
-    src: /tmp/openldap-ykbind-artifacts/openldap-ykbind_migrate.tar
-    dest: /opt/openldap-ykbind/images/openldap-ykbind_migrate.tar
-    mode: '0644'
-
-- name: Load migration image on target host
-  ansible.builtin.command:
-    argv:
-      - docker
-      - load
-      - -i
-      - /opt/openldap-ykbind/images/openldap-ykbind_migrate.tar
 
 - name: Show exported image archive details
   ansible.builtin.stat:

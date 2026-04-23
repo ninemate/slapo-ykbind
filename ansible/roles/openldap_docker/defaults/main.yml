@@ -14,6 +14,7 @@ ldap_local_image_archive: "{{ ldap_local_artifact_root }}/{{ ldap_local_image_ar
 ldap_local_build_log: "{{ ldap_local_artifact_root }}/docker-build.log"
 ldap_runtime_dir: "{{ ldap_deploy_root }}/runtime"
 ldap_runtime_ldif_dir: "{{ ldap_runtime_dir }}/ldif"
+ldap_runtime_config_import_dir: "{{ ldap_runtime_ldif_dir }}/config-imports"
 ldap_runtime_schema_dir: "{{ ldap_runtime_dir }}/schema"
 ldap_runtime_import_dir: "{{ ldap_runtime_ldif_dir }}/imports"
 ldap_tls_host_dir: "{{ ldap_runtime_dir }}/tls"
@@ -53,6 +54,7 @@ ldap_enable_ldaps: false
 ldap_force_password_reset: false
 ldap_enable_syslog_ng: false
 ldap_open_files_limit: 1024
+ldap_deploy_mode: fresh
 
 ldap_base_object_classes:
   - top
@@ -67,10 +69,15 @@ ldap_base_ous:
   - Services
 
 ldap_additional_schema_ldifs: []
+ldap_migration_config_ldifs: []
 ldap_bootstrap_ldif_file: ""
 ldap_ldif_import_enabled: false
 ldap_ldif_import_file: ""
 ldap_force_full_import: false
+ldap_ldif_filter_enabled: true
+ldap_ldif_drop_subtrees:
+  - "ou=dns,{{ ldap_base_dn }}"
+ldap_ldif_drop_objectclasses: []
 
 ldap_tls_certificate_src: ""
 ldap_tls_private_key_src: ""

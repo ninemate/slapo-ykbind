@@ -1,11 +1,25 @@
 ---
+- name: Validate LDAP deploy mode
+  ansible.builtin.assert:
+    that:
+      - ldap_deploy_mode in ['fresh', 'migration']
+    fail_msg: "ldap_deploy_mode must be either 'fresh' or 'migration'."
+
 - name: Set import mode facts
   ansible.builtin.set_fact:
     ldap_full_import_requested: "{{ (ldap_ldif_import_enabled | bool) or (ldap_ldif_import_file | length > 0) }}"
+    ldap_migration_mode: "{{ ldap_deploy_mode == 'migration' }}"
     ldap_ldif_import_src_path: >-
       {{ ldap_ldif_import_file if (ldap_ldif_import_file | length > 0 and ldap_ldif_import_file.startswith('/'))
          else (repo_root ~ '/' ~ ldap_ldif_import_file) if (ldap_ldif_import_file | length > 0)
          else '' }}
+
+- name: Require a full-tree LDIF for migration mode
+  ansible.builtin.assert:
+    that:
+      - ldap_ldif_import_file | length > 0
+    fail_msg: "ldap_deploy_mode=migration requires ldap_ldif_import_file."
+  when: ldap_migration_mode | bool
 
 - name: Read first DN from full import LDIF on control node
   ansible.builtin.shell: |
@@ -34,3 +48,7 @@
     - ldap_full_import_requested
     - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
 
+- name: Set effective init and tree bootstrap facts
+  ansible.builtin.set_fact:
+    ldap_effective_init_mode: "{{ ((ldap_migration_mode | bool) or (ldap_full_import_requested | bool)) | ternary('config-only', 'fresh') }}"
+    ldap_tree_bootstrap_enabled: "{{ not ((ldap_migration_mode | bool) or (ldap_full_import_requested | bool)) }}"

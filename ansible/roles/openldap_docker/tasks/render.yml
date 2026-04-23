@@ -31,6 +31,14 @@
   loop: "{{ ldap_additional_schema_ldifs }}"
   when: ldap_additional_schema_ldifs | length > 0
 
+- name: Copy optional migration config LDIFs to target host
+  ansible.builtin.copy:
+    src: "{{ item if item.startswith('/') else repo_root ~ '/' ~ item }}"
+    dest: "{{ ldap_runtime_config_import_dir }}/{{ item | basename }}"
+    mode: "0644"
+  loop: "{{ ldap_migration_config_ldifs }}"
+  when: ldap_migration_config_ldifs | length > 0
+
 - name: Render Docker Compose manifest
   ansible.builtin.template:
     src: docker-compose.yml.j2
