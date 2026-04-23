@@ -590,6 +590,141 @@ Kompatibilitási aliasok:
 - `YKkeyCounter`
 - `YKsessionTimestamp`
 
+## YubiKey attribútumok felvétele meglévő userekre
+
+Ha a user entryk strukturális object class-a például `customProfileClass`, ahhoz gond nélkül hozzáadható a YubiKey auxiliary class:
+
+- `objectClass: yubiKeyTokenAux`
+
+A biztonságos sorrend:
+
+1. add hozzá a `yubiKeyTokenAux` osztályt
+2. állítsd be a `yubiKeyEnabled: FALSE` értéket
+3. töltsd fel a userhez tartozó YubiKey secret mezőket
+4. csak ezután állítsd `yubiKeyEnabled: TRUE` értékre
+
+Ez fontos, mert az overlay akkor is elkezdhet OTP-t követelni, ha a secret mezők már bent vannak, de a `yubiKeyEnabled` mező nincs explicit `FALSE` értékre állítva.
+
+Minden `cn` azonosítójú entry előkészítése `ou=people` alatt, ahol van `objectClass=customProfileClass`, de még nincs `yubiKeyTokenAux`:
+
+```bash
+ldapsearch -x -LLL -D "cn=admin,dc=example,dc=org" -W \
+  -H ldap://127.0.0.1:389 \
+  -b "ou=people,dc=example,dc=org" \
+  "(&(objectClass=customProfileClass)(cn=*)(!(objectClass=yubiKeyTokenAux)))" dn |
+awk '
+  /^dn: / {
+    dn=substr($0,5)
+    print "dn: " dn
+    print "changetype: modify"
+    print "add: objectClass"
+    print "objectClass: yubiKeyTokenAux"
+    print "-"
+    print "add: yubiKeyEnabled"
+    print "yubiKeyEnabled: FALSE"
+    print ""
+  }
+' > /tmp/yubikey-bootstrap-disabled.ldif
+```
+
+Alkalmazás:
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=org" -W \
+  -H ldap://127.0.0.1:389 \
+  -f /tmp/yubikey-bootstrap-disabled.ldif
+```
+
+Ha egy entryn már rajta van a `yubiKeyTokenAux`, de még nincs `yubiKeyEnabled`, akkor külön ezt is fel lehet venni:
+
+```bash
+ldapsearch -x -LLL -D "cn=admin,dc=example,dc=org" -W \
+  -H ldap://127.0.0.1:389 \
+  -b "ou=people,dc=example,dc=org" \
+  "(&(objectClass=customProfileClass)(objectClass=yubiKeyTokenAux)(!(yubiKeyEnabled=*)))" dn |
+awk '
+  /^dn: / {
+    dn=substr($0,5)
+    print "dn: " dn
+    print "changetype: modify"
+    print "add: yubiKeyEnabled"
+    print "yubiKeyEnabled: FALSE"
+    print ""
+  }
+' > /tmp/yubikey-set-disabled.ldif
+```
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=org" -W \
+  -H ldap://127.0.0.1:389 \
+  -f /tmp/yubikey-set-disabled.ldif
+```
+
+Példa egy user YubiKey secret mezőinek feltöltésére úgy, hogy még letiltott állapotban maradjon:
+
+```ldif
+dn: cn=Alice Example,ou=people,dc=example,dc=org
+changetype: modify
+replace: yubiKeyEnabled
+yubiKeyEnabled: FALSE
+-
+replace: yubiKeyPublicId
+yubiKeyPublicId: cccjgjgkhcbb
+-
+replace: yubiKeyPrivateUid
+yubiKeyPrivateUid: 001122334455
+-
+replace: yubiKeyAesKey
+yubiKeyAesKey: 8899aabbccddeeff0011223344556677
+-
+replace: yubiKeyLastUseCtr
+yubiKeyLastUseCtr: 0
+-
+replace: yubiKeyLastSessionCtr
+yubiKeyLastSessionCtr: 0
+-
+replace: yubiKeyLastTimestamp
+yubiKeyLastTimestamp: 0
+```
+
+Ezután az adott user engedélyezése:
+
+```ldif
+dn: cn=Alice Example,ou=people,dc=example,dc=org
+changetype: modify
+replace: yubiKeyEnabled
+yubiKeyEnabled: TRUE
+```
+
+Tömeges engedélyezés azoknál a usereknél, ahol a secret mezők már megvannak:
+
+```bash
+ldapsearch -x -LLL -D "cn=admin,dc=example,dc=org" -W \
+  -H ldap://127.0.0.1:389 \
+  -b "ou=people,dc=example,dc=org" \
+  "(&(objectClass=customProfileClass)(objectClass=yubiKeyTokenAux)(yubiKeyPrivateUid=*)(yubiKeyAesKey=*))" dn |
+awk '
+  /^dn: / {
+    dn=substr($0,5)
+    print "dn: " dn
+    print "changetype: modify"
+    print "replace: yubiKeyEnabled"
+    print "yubiKeyEnabled: TRUE"
+    print ""
+  }
+' > /tmp/yubikey-enable.ldif
+```
+
+```bash
+ldapmodify -x -D "cn=admin,dc=example,dc=org" -W \
+  -H ldap://127.0.0.1:389 \
+  -f /tmp/yubikey-enable.ldif
+```
+
+Javasolt ACL-lel védeni a secret mezőket. Van hozzá példa itt:
+
+- [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif)
+
 ## Kézi LDAP példák
 
 Megmaradt kézi referenciafájlok:
