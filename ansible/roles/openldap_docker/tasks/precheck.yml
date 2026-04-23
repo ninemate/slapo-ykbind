@@ -1,0 +1,58 @@
+---
+- name: Inspect existing LDAP config/data directories on target host
+  ansible.builtin.find:
+    paths: "{{ item.path }}"
+    recurse: false
+    hidden: true
+  loop:
+    - name: config
+      path: "{{ ldap_config_dir }}"
+    - name: data
+      path: "{{ ldap_data_dir }}"
+  register: ldap_existing_dir_checks
+  failed_when: false
+
+- name: Store existing LDAP directory state
+  ansible.builtin.set_fact:
+    ldap_existing_config_dir_state: "{{ (ldap_existing_dir_checks.results | selectattr('item.name', 'equalto', 'config') | list | first) | default({}) }}"
+    ldap_existing_data_dir_state: "{{ (ldap_existing_dir_checks.results | selectattr('item.name', 'equalto', 'data') | list | first) | default({}) }}"
+
+- name: Reject import-specific variables in adopt_existing mode
+  ansible.builtin.assert:
+    that:
+      - ldap_ldif_import_file | length == 0
+      - ldap_migration_config_ldifs | length == 0
+      - ldap_additional_schema_ldifs | length == 0
+    fail_msg: >-
+      adopt_existing mode starts from an already existing cn=config and data directory.
+      Do not pass full-tree import, migration config LDIFs, or additional schema imports
+      to this mode.
+  when: ldap_adopt_existing_mode | bool
+
+- name: Require existing cn=config directory for adopt_existing mode
+  ansible.builtin.assert:
+    that:
+      - ldap_existing_config_dir_state.examined | default(0) | int > 0
+      - ldap_existing_config_dir_state.matched | default(0) | int > 0
+    fail_msg: >-
+      adopt_existing mode requires a populated cn=config directory at {{ ldap_config_dir }}.
+      The directory is missing or empty on the target host.
+  when: ldap_adopt_existing_mode | bool
+
+- name: Require existing data directory for adopt_existing mode
+  ansible.builtin.assert:
+    that:
+      - ldap_existing_data_dir_state.examined | default(0) | int > 0
+      - ldap_existing_data_dir_state.matched | default(0) | int > 0
+    fail_msg: >-
+      adopt_existing mode requires a populated data directory at {{ ldap_data_dir }}.
+      The directory is missing or empty on the target host.
+  when: ldap_adopt_existing_mode | bool
+
+- name: Show detected target state for full_import mode
+  ansible.builtin.debug:
+    msg:
+      - "full_import mode will recreate the persistent target directories before container start."
+      - "config dir={{ ldap_config_dir }} existing entries={{ ldap_existing_config_dir_state.matched | default(0) }}"
+      - "data dir={{ ldap_data_dir }} existing entries={{ ldap_existing_data_dir_state.matched | default(0) }}"
+  when: ldap_full_import_requested | bool

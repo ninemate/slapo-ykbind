@@ -4,16 +4,15 @@ Tipikus fájlok:
 
 - `full-tree.ldif`
 - `full-tree.filtered.ldif`
-- `bootstrap.ldif`
 - `source-cn-config.reference.ldif`
 - `migration-config.ldif`
 
-Full migration példa:
+Full import példa:
 
 ```bash
 cd /home/username/Documents/yubik/ansible
 ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_deploy_mode=migration \
+  -e ldap_deploy_mode=full_import \
   -e ldap_admin_password='<set-admin-password>' \
   -e ldap_ldif_import_file=exports/full-tree.ldif
 ```

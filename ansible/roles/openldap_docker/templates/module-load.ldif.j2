@@ -1,7 +1,16 @@
-dn: cn=module{0},cn=config
+dn: {{ ldap_module_config_dn }}
+{% if ldap_module_config_exists | bool %}
 changetype: modify
-replace: olcModulePath
+{% if not (ldap_module_path_present | bool) %}
+add: olcModulePath
 olcModulePath: {{ ldap_container_module_dir }}
 -
+{% endif %}
 add: olcModuleLoad
 olcModuleLoad: {{ ldap_container_module_name }}
+{% else %}
+objectClass: olcModuleList
+cn: module{0}
+olcModulePath: {{ ldap_container_module_dir }}
+olcModuleLoad: {{ ldap_container_module_name }}
+{% endif %}

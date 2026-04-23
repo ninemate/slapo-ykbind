@@ -2,24 +2,39 @@
 - name: Validate LDAP deploy mode
   ansible.builtin.assert:
     that:
-      - ldap_deploy_mode in ['fresh', 'migration']
-    fail_msg: "ldap_deploy_mode must be either 'fresh' or 'migration'."
+      - ldap_deploy_mode in ['full_import', 'adopt_existing', 'migration']
+    fail_msg: >-
+      ldap_deploy_mode must be one of: full_import, adopt_existing.
+      The old migration value is still accepted as an alias for full_import.
 
-- name: Set import mode facts
+- name: Resolve effective deploy mode
   ansible.builtin.set_fact:
-    ldap_full_import_requested: "{{ (ldap_ldif_import_enabled | bool) or (ldap_ldif_import_file | length > 0) }}"
-    ldap_migration_mode: "{{ ldap_deploy_mode == 'migration' }}"
+    ldap_mode: "{{ 'full_import' if ldap_deploy_mode in ['full_import', 'migration'] else 'adopt_existing' }}"
+
+- name: Set mode facts
+  ansible.builtin.set_fact:
+    ldap_full_import_requested: "{{ ldap_mode == 'full_import' }}"
+    ldap_adopt_existing_mode: "{{ ldap_mode == 'adopt_existing' }}"
     ldap_ldif_import_src_path: >-
       {{ ldap_ldif_import_file if (ldap_ldif_import_file | length > 0 and ldap_ldif_import_file.startswith('/'))
          else (repo_root ~ '/' ~ ldap_ldif_import_file) if (ldap_ldif_import_file | length > 0)
          else '' }}
+    ldap_effective_init_mode: "{{ (ldap_mode == 'full_import') | ternary('config-only', 'disabled') }}"
 
-- name: Require a full-tree LDIF for migration mode
+- name: Require a full-tree LDIF for full_import mode
   ansible.builtin.assert:
     that:
       - ldap_ldif_import_file | length > 0
-    fail_msg: "ldap_deploy_mode=migration requires ldap_ldif_import_file."
-  when: ldap_migration_mode | bool
+    fail_msg: "ldap_deploy_mode=full_import requires ldap_ldif_import_file."
+  when: ldap_full_import_requested | bool
+
+- name: Reject legacy fresh mode variables that are not part of the supported flows
+  ansible.builtin.assert:
+    that:
+      - ldap_bootstrap_ldif_file | length == 0
+    fail_msg: >-
+      ldap_bootstrap_ldif_file is no longer part of the supported deploy flows.
+      Use ldap_deploy_mode=full_import or ldap_deploy_mode=adopt_existing.
 
 - name: Read first DN from full import LDIF on control node
   ansible.builtin.shell: |
@@ -47,8 +62,3 @@
   when:
     - ldap_full_import_requested | bool
     - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
-
-- name: Set effective init and tree bootstrap facts
-  ansible.builtin.set_fact:
-    ldap_effective_init_mode: "{{ ((ldap_migration_mode | bool) or (ldap_full_import_requested | bool)) | ternary('config-only', 'fresh') }}"
-    ldap_tree_bootstrap_enabled: "{{ not ((ldap_migration_mode | bool) or (ldap_full_import_requested | bool)) }}"

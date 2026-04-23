@@ -214,6 +214,17 @@ if [ -n "$output_import_ldif" ]; then
     : > "$output_import_ldif"
 fi
 
+schema_source_entries=0
+while IFS= read -r entry_file; do
+    [ -n "$entry_file" ] || continue
+    entry_oids="$tmpdir/$(basename "$entry_file").precount.oids"
+    extract_oids "$entry_file" > "$entry_oids"
+    entry_definition_total="$(sed '/^$/d' "$entry_oids" | wc -l | tr -d ' ')"
+    if [ "$entry_definition_total" -gt 0 ]; then
+        schema_source_entries=$((schema_source_entries + 1))
+    fi
+done < "$entry_list"
+
 schema_entries_total=0
 schema_entries_missing=0
 schema_entries_present=0
@@ -284,7 +295,7 @@ while IFS= read -r entry_file; do
     if [ "$entry_hits" -eq "$entry_definition_total" ]; then
         schema_entries_present=$((schema_entries_present + 1))
         present_schema_names="$(csv_append "$present_schema_names" "$schema_name")"
-    elif [ "$name_present" = "true" ]; then
+    elif [ "$name_present" = "true" ] && [ "$schema_source_entries" -gt 1 ]; then
         # Full source dumps often contain built-in schema entries whose content
         # differs slightly between OpenLDAP versions. A same-name target schema
         # must not be re-added; skip it and only import entirely missing entries.

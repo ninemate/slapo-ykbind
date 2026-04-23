@@ -7,10 +7,10 @@ Ez a repository két dolgot ad egyben:
 
 A cél a "one click" deploy két tiszta móddal:
 
-- `fresh`: új LDAP indul, a role létrehozza a base DN-t és az alap OU-kat
-- `migration`: a konténer csak `cn=config`-et inicializál, nem hoz létre base DN entryt, majd offline `slapadd` importálja a teljes tree-t
+- `full_import`: teljesen szűz célra épít új `cn=config`-et, majd explicit config/schema/data importtal tölti fel az LDAP-ot
+- `adopt_existing`: meglévő `cn=config` és adatkönyvtár bind mounttal indul, és nem próbálja átírni a meglévő LDAP állapotot
 
-Egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et, tarballként áttölti az LDAP VM-re, elindítja a konténert, betölti a szükséges config/schema/modul/overlay konfigurációt, fresh módban felépíti az LDAP tree alapját, migration módban pedig teljes exportot importál.
+Egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et, tarballként áttölti az LDAP VM-re, elindítja a konténert, majd a választott módnak megfelelően vagy végrehajtja a teljes importot, vagy átveszi a meglévő bare-metal OpenLDAP állapotot konténerben.
 
 ## Mit csinál a playbook
 
@@ -24,12 +24,13 @@ Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansibl
 - létrehozza a target hoston a deploy könyvtárakat
 - elindítja a konténert Docker Compose-szal
 - inicializálja a slapd konfigurációt és a választott init módot az [docker/openldap/entrypoint.sh](/home/username/Documents/yubik/docker/openldap/entrypoint.sh) segítségével
-- opcionálisan lefuttat migrációs `cn=config` módosító LDIF-eket
-- betölti a `yubikey-otp` schema-t
-- betölti a `ykbind.so` modult és hozzáadja az overlayt a fő adatbázishoz
-- fresh módban létrehozza a base DN-t és a szükséges OU-kat
-- migration módban kihagy minden base DN / OU bootstrapet, opcionálisan szűri a nem támogatott LDIF részeket, majd offline importálja a teljes tree-t
-- lefuttatja az admin bind és base query smoke teszteket
+- `full_import` módban szándékosan újra létrehozza a perzisztens `data/` és `config/` könyvtárakat
+- `full_import` módban minimális, szűz `cn=config`-et bootstrapol
+- `full_import` módban opcionális hordozható `cn=config` módosító LDIF-eket alkalmaz
+- `full_import` módban betölti a `yubikey-otp` schema-t, az extra schema LDIF-eket, a `ykbind.so` modult és az overlayt
+- `full_import` módban opcionálisan kiszűri a nem támogatott LDIF részeket, majd offline `slapadd`-dal importálja a teljes tree-t
+- `adopt_existing` módban a már meglévő bind mountolt `cn=config` és adatállapotot használja, és nem próbálja újraimportálni a schema/modul/overlay konfigurációt
+- lefuttatja a megfelelő smoke teszteket
 
 ## Branch kontextus
 
@@ -122,12 +123,10 @@ ldap_no_proxy: localhost,127.0.0.1
 ldap_listen_port: 389
 ldap_ldaps_port: 636
 ldap_enable_ldaps: false
-ldap_deploy_mode: fresh
+ldap_deploy_mode: full_import
 
 ldap_migration_config_ldifs: []
-ldap_ldif_import_enabled: false
 ldap_ldif_import_file: ""
-ldap_bootstrap_ldif_file: ""
 ldap_ldif_filter_enabled: true
 ldap_ldif_drop_subtrees:
   - "ou=dns,{{ ldap_base_dn }}"
@@ -143,20 +142,20 @@ ldap_log_dir: /opt/openldap-ykbind/logs
 
 További fontos, deploy közben gyakran használt változók:
 
-- `ldap_base_ous`
 - `ldap_ports`
 - `ldap_container_base_image`
 - `ldap_docker_build_network`
 - `ldap_skip_local_build`
 - `ldap_skip_local_save`
 - `ldap_deploy_mode`
+- `ldap_data_dir`
+- `ldap_config_dir`
 - `ldap_migration_config_ldifs`
 - `ldap_ldif_import_file`
 - `ldap_ldif_filter_enabled`
 - `ldap_ldif_drop_subtrees`
 - `ldap_ldif_drop_objectclasses`
 - `ldap_force_password_reset`
-- `ldap_force_full_import`
 - `ldap_enable_syslog_ng`
 - `ldap_open_files_limit`
 - `ldap_tls_certificate_src`
@@ -172,30 +171,27 @@ Felülírási lehetőségek:
 
 ## One-click deploy futtatás
 
-Lokális inventoryval:
-
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml
-```
-
-Példa saját alap DN-nel és admin jelszóval:
+`full_import` példa lokális inventoryval:
 
 ```bash
 cd /home/username/Documents/yubik/ansible
 ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=full_import \
   -e ldap_domain=example.org \
   -e ldap_base_dn=dc=example,dc=org \
-  -e ldap_organization="Example Org" \
   -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
-  -e ldap_admin_password='<set-admin-password>'
+  -e ldap_admin_password='<set-admin-password>' \
+  -e ldap_ldif_import_file=exports/full-tree.ldif
 ```
 
-Példa távoli hostra:
+`adopt_existing` példa távoli hostra:
 
 ```bash
 cd /home/username/Documents/yubik/ansible
-ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=adopt_existing \
+  -e ldap_config_dir=/opt/openldap/config \
+  -e ldap_data_dir=/opt/openldap-ykbind/data
 ```
 
 Ha a local image már biztosan elkészült a control node-on, újrafuttatáskor a build kihagyható:
@@ -215,14 +211,13 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e ldap_skip_local_save=true
 ```
 
-Full migrate megjegyzés:
+Deploy mód megjegyzés:
 
-- `ldap_deploy_mode=fresh`: normál új LDAP deploy, base DN és OU bootstrap engedélyezett
-- `ldap_deploy_mode=migration`: teljes restore mód, a konténer `LDAP_INIT_MODE=config-only` értékkel indul, így nem marad előre létrehozott base DN az adatbázisban
-- ha `ldap_ldif_import_file` meg van adva, a role full importként kezeli akkor is, ha a külön `ldap_ldif_import_enabled=true` nincs megadva
-- full import módban a role nem hoz létre default base DN-t és default OU-kat
-- ha a `ldap_base_dn` még az alap `dc=example,dc=org` értéken van, a role megpróbálja az import LDIF első `dn:` sorából levezetni
-- ha az admin DN is még alapértéken van, azt `cn=admin,<derived_base_dn>` formára állítja
+- `ldap_deploy_mode=full_import`: migration-first mód; a role automatikusan újra létrehozza a perzisztens `data/` és `config/` könyvtárakat, `LDAP_INIT_MODE=config-only` módban indítja a konténert, majd explicit config/schema/data importot hajt végre
+- `ldap_deploy_mode=adopt_existing`: meglévő bind mountolt `cn=config` és adatállapotot használ; a role `LDAP_INIT_MODE=disabled` módban indít, és nem próbál módosító init/import műveleteket futtatni
+- a régi `migration` módnév továbbra is elfogadott, belsőleg `full_import`-ként viselkedik
+- ha a `ldap_base_dn` még az alap `dc=example,dc=org` értéken van, full import módban a role megpróbálja az import LDIF első `dn:` sorából levezetni
+- ha az admin DN is még alapértéken van, full import módban azt `cn=admin,<derived_base_dn>` formára állítja
 
 ## A deploy által létrehozott target oldali könyvtárak
 
@@ -335,40 +330,16 @@ tools/filter-unsupported-ldif.sh \
   exports/full-tree.ldif
 ```
 
-## Fresh deploy futtatása
+## Full import futtatása
 
-Fresh módban a cél egy új, üres LDAP, ahol a role létrehozza a base DN-t és a `ldap_base_ous` alatti OU-kat:
-
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_deploy_mode=fresh \
-  -e ldap_domain=example.org \
-  -e ldap_base_dn=dc=example,dc=org \
-  -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
-  -e ldap_admin_password='<set-admin-password>'
-```
-
-Bootstrap LDIF import fresh módhoz:
-
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_deploy_mode=fresh \
-  -e ldap_admin_password='<set-admin-password>' \
-  -e ldap_bootstrap_ldif_file=exports/bootstrap.ldif
-```
-
-## Full migration import futtatása
-
-Migration módban a cél adatbázisnak szűznek kell lennie. A konténer `LDAP_INIT_MODE=config-only` értékkel indul: létrejön a működő `cn=config`, de az entrypoint kitörli a Debian bootstrap által létrehozott adatfát, ezért a full-tree LDIF saját base DN-je ütközés nélkül importálható.
+`full_import` módban a role mindig szűz cél LDAP-ot készít elő. A perzisztens `data/` és `config/` könyvtárak törlésre és újra létrehozásra kerülnek, a konténer csak minimális `cn=config` állapottal indul, és sem az entrypoint, sem az Ansible nem hoz létre előre base DN-t vagy OU-kat.
 
 Teljes restore:
 
 ```bash
 cd /home/username/Documents/yubik/ansible
 ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_deploy_mode=migration \
+  -e ldap_deploy_mode=full_import \
   -e ldap_domain=example.org \
   -e ldap_base_dn=dc=example,dc=org \
   -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
@@ -385,13 +356,12 @@ cd /home/username/Documents/yubik/ansible
 ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   --limit ldap_new_host \
   -Kk \
-  -e ldap_deploy_mode=migration \
+  -e ldap_deploy_mode=full_import \
   -e ldap_domain=example.org \
   -e ldap_base_dn=dc=example,dc=org \
   -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
   -e ldap_admin_password='<set-admin-password>' \
   -e ldap_container_base_image=debian:trixie \
-  -e ldap_reset_before_full_import=true \
   -e ldap_ldif_filter_enabled=true \
   -e ldap_ldif_drop_subtrees='["ou=dns,dc=example,dc=org"]' \
   -e ldap_additional_schema_ldifs='["schema/custom.ldif","schema/legacy-app.ldif"]' \
@@ -405,29 +375,50 @@ A migrációs config LDIF-ek legyenek újrafuttatható `changetype: modify` jell
 
 Az import sorrendje a playbookban:
 
-1. Docker image build/load és konténerindítás `LDAP_INIT_MODE=config-only` módban
-2. suffix/rootDN/rootPW beállítás a cél `cn=config` alatt
-3. `ldap_migration_config_ldifs` alkalmazása `ldapmodify -Y EXTERNAL` paranccsal
-4. bundled `yubikey-otp` schema és `ldap_additional_schema_ldifs` betöltése
-5. `ykbind.so` modul és overlay konfigurálása
-6. `ou=dns` és egyéb megadott részek szűrése a full-tree LDIF-ből
-7. konténer leállítása
-8. offline `slapadd -F /etc/ldap/slapd.d -n 1 -l full-tree.ldif`
-9. DB ownership javítása és konténer újraindítása
+1. Docker image build/load
+2. perzisztens `data/` és `config/` könyvtárak újra létrehozása
+3. konténerindítás `LDAP_INIT_MODE=config-only` módban
+4. suffix/rootDN/rootPW beállítás a cél `cn=config` alatt
+5. `ldap_migration_config_ldifs` alkalmazása `ldapmodify -Y EXTERNAL` paranccsal
+6. bundled `yubikey-otp` schema és `ldap_additional_schema_ldifs` betöltése
+7. `ykbind.so` modul és overlay konfigurálása
+8. `ou=dns` és egyéb megadott részek szűrése a full-tree LDIF-ből
+9. konténer leállítása
+10. offline `slapadd -F /etc/ldap/slapd.d -n 1 -l full-tree.ldif`
+11. DB ownership javítása és konténer újraindítása
+
+## Adopt existing futtatása
+
+`adopt_existing` módban a role nem próbálja újrainicializálni vagy átírni a meglévő LDAP-ot. A bind mountolt `cn=config` és adatkönyvtárakból indul, `LDAP_INIT_MODE=disabled` módban.
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  --limit ldap_existing_host \
+  -Kk \
+  -e ldap_deploy_mode=adopt_existing \
+  -e ldap_config_dir=/opt/openldap/config \
+  -e ldap_data_dir=/opt/openldap-ykbind/data \
+  -e ldap_log_dir=/opt/openldap-ykbind/logs \
+  -e ldap_container_base_image=debian:trixie
+```
+
+Ebben a módban:
+
+- a `ldap_config_dir` és `ldap_data_dir` könyvtárnak a playbook indulásakor már léteznie és tartalmaznia kell adatot
+- a role nem futtat schema importot
+- a role nem futtat migration config LDIF-et
+- a role nem módosítja a `cn=module` entryt
+- a role nem hoz létre base DN-t vagy OU-kat
+- a role csak külső `ldapi:///` smoke teszteket fut
 
 Fontos restore megjegyzések:
 
 - a full restore nem merge mechanizmus, hanem üres céladatbázisba történő betöltés
 - ha a base DN már létezik, a playbook megáll, mert az import biztosan ütközne
-- meglévő céladatbázis migrációjához előbb szándékosan üríteni kell a perzisztens `data/` és `config/` köteteket, vagy a futtatásnál meg kell adni: `-e ldap_reset_before_full_import=true`
-- a reset a `ldap_data_dir` és `ldap_config_dir` útvonalakat törli, alapértelmezésben `/opt/openldap-ykbind/data` és `/opt/openldap-ykbind/config`; figyelj arra, hogy ne elírt deploy rootot törölj kézzel
+- `full_import` módban a role automatikusan törli és újra létrehozza a perzisztens `data/` és `config/` könyvtárakat
+- `adopt_existing` módban a role ezekhez a könyvtárakhoz nem nyúl destruktívan
 - relatív LDIF útvonalakat a role a repository gyökeréhez viszonyítva old fel
-
-Idempotencia megjegyzés:
-
-- alapértelmezésben a bootstrap marker itt jön létre: `/opt/openldap-ykbind/data/.bootstrap-import-done`
-- alapértelmezésben a full import marker itt jön létre: `/opt/openldap-ykbind/data/.full-import-done`
-- ha újra akarod futtatni az importot, a marker törlése mellett a perzisztens LDAP adatot is tisztázni kell
 
 ## TLS / LDAPS
 
@@ -499,14 +490,14 @@ Ez hasznos gyors sanity checkhez is: így először a konténer deploy láncot t
 
 A deploy során a role:
 
-- fresh módban létrehozza a base DN entryt, ha még nem létezik
-- fresh módban létrehozza a `ldap_base_ous` listában szereplő OU-kat
-- migration módban kihagyja a base DN és OU bootstrapet
-- importálja a saját schema LDIF-et
-- opcionálisan további schema LDIF-eket is importál a `ldap_additional_schema_ldifs` listából
-- opcionálisan migrációs config LDIF-eket alkalmaz a `ldap_migration_config_ldifs` listából
-- szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
-- opcionálisan TLS fájlútvonalakat konfigurál a `cn=config` alatt
+- `full_import` módban újra létrehozza a perzisztens `data/` és `config/` könyvtárakat
+- `full_import` módban csak minimális `cn=config`-et bootstrapol
+- `full_import` módban importálja a saját schema LDIF-et
+- `full_import` módban opcionálisan további schema LDIF-eket is importál a `ldap_additional_schema_ldifs` listából
+- `full_import` módban opcionálisan hordozható config LDIF-eket alkalmaz a `ldap_migration_config_ldifs` listából
+- `full_import` módban szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
+- `full_import` módban betölti a modult és felveszi az overlayt
+- `adopt_existing` módban nem futtat destruktív vagy módosító init/import műveleteket a meglévő `cn=config` ellen
 
 A schema import nem fix `cn={N}` indexre támaszkodik. A role minden schema import előtt kiolvassa a teljes `cn=schema,cn=config` tartalmat, majd a betöltendő LDIF-et schema entrynként hasonlítja össze a meglévő állapottal. Egy teljes forrásoldali `cn=schema,cn=config` dump is megadható: a már meglévő beépített schema entryk kimaradnak, és csak a teljesen hiányzó custom schema entryk kerülnek egy szűrt import LDIF-be. Ha egy hiányzó nevű entry OID-jai részben már léteznek más schema alatt, a playbook hibával megáll, mert az `ldapadd` ilyen esetben `duplicate attributeType` hibával bukna.
 
@@ -516,7 +507,7 @@ Az entrypoint init módjai:
 - `LDAP_INIT_MODE=config-only`: Debian `slapd` bootstrap után a `/var/lib/ldap` törlődik, így csak a működő `cn=config` marad meg
 - `LDAP_INIT_MODE=disabled`: nincs bootstrap; csak előre mountolt, érvényes `/etc/ldap/slapd.d` mellett használható
 
-Megjegyzés: fresh módban a `slapd` Debianos inicializálása a `ldap_domain` alapján hozza létre az első suffixet. A legtisztább működéshez a `ldap_domain` és `ldap_base_dn` legyen összhangban. Migration módban a role ezt a bootstrap adatot kitörli, majd a full tree saját base DN-jét tölti be.
+Megjegyzés: `full_import` módban a `slapd` Debianos inicializálása csak átmeneti, minimális `cn=config` állapot előállítására szolgál. A role ezután explicit config/schema/data import lépésekkel készíti elő a cél LDAP-ot. `adopt_existing` módban ez a bootstrap nem fut le, mert a konténer közvetlenül a már meglévő bind mountolt `cn=config`-ből indul.
 
 Konténer-specifikus megjegyzés:
 

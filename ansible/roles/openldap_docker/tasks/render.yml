@@ -51,16 +51,5 @@
     dest: "{{ ldap_runtime_ldif_dir }}/{{ item.dest }}"
     mode: "0644"
   loop:
-    - src: base-entry.ldif.j2
-      dest: base-entry.ldif
-    - src: module-load.ldif.j2
-      dest: module-load.ldif
     - src: tls-config.ldif.j2
       dest: tls-config.ldif
-
-- name: Render OU LDIF files
-  ansible.builtin.template:
-    src: ou-entry.ldif.j2
-    dest: "{{ ldap_runtime_ldif_dir }}/ou-{{ item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
-    mode: "0644"
-  loop: "{{ ldap_base_ous }}"

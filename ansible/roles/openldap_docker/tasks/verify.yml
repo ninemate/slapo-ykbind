@@ -1,5 +1,20 @@
 ---
-- name: Smoke test admin bind with ldapwhoami
+- name: Smoke test ldapi EXTERNAL bind
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapwhoami
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+  register: ldap_ldapi_smoke_check
+  changed_when: false
+
+- name: Smoke test admin bind with ldapwhoami in full_import mode
   ansible.builtin.command:
     argv:
       - docker
@@ -15,8 +30,9 @@
       - ldap://127.0.0.1
   register: ldap_whoami_check
   changed_when: false
+  when: ldap_full_import_requested | bool
 
-- name: Smoke test base search
+- name: Smoke test base search in full_import mode
   ansible.builtin.command:
     argv:
       - docker
@@ -39,8 +55,9 @@
       - dn
   register: ldap_base_search_check
   changed_when: false
+  when: ldap_full_import_requested | bool
 
-- name: Smoke test ykbind overlay visibility
+- name: Smoke test ykbind overlay visibility in full_import mode
   ansible.builtin.command:
     argv:
       - docker
@@ -59,7 +76,9 @@
       - dn
   register: ldap_overlay_smoke_check
   changed_when: false
-  when: ldap_module_build_enabled | bool
+  when:
+    - ldap_full_import_requested | bool
+    - ldap_module_build_enabled | bool
 
 - name: Optional smoke test for a specific user DN
   ansible.builtin.command:
@@ -83,4 +102,6 @@
       - "(objectClass=*)"
       - dn
   changed_when: false
-  when: ldap_smoke_test_user_dn | length > 0
+  when:
+    - ldap_full_import_requested | bool
+    - ldap_smoke_test_user_dn | length > 0

@@ -1,47 +1,6 @@
 ---
-- name: Wait until ldapi is ready inside the container
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapwhoami
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-  register: ldap_ldapi_ready
-  retries: 30
-  delay: 2
-  until: ldap_ldapi_ready.rc == 0
-  changed_when: false
-
-- name: Discover the primary LDAP database entry
-  ansible.builtin.shell: >
-    docker exec {{ ldap_container_name }} sh -lc
-    "ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config
-    '(&(objectClass=olcDatabaseConfig)(!(olcDatabase=config))(!(olcDatabase=frontend))(olcSuffix=*))'
-    dn olcSuffix olcRootDN |
-    awk '
-      /^dn: / { sub(/^dn: /, \"\", \$0); dn=\$0 }
-      /^olcSuffix: / { sub(/^olcSuffix: /, \"\", \$0); suffix=\$0 }
-      /^olcRootDN: / { sub(/^olcRootDN: /, \"\", \$0); rootdn=\$0 }
-      END { if (dn != \"\") { printf \"%s|%s|%s\\n\", dn, suffix, rootdn } }
-    '"
-  register: ldap_db_lookup
-  changed_when: false
-
-- name: Fail if no LDAP database entry was found
-  ansible.builtin.fail:
-    msg: "Nem sikerült azonosítani az OpenLDAP backend adatbázist a cn=config alatt."
-  when: ldap_db_lookup.stdout | trim == ""
-
-- name: Store current database metadata
-  ansible.builtin.set_fact:
-    ldap_database_config_dn: "{{ (ldap_db_lookup.stdout.split('|'))[0] }}"
-    ldap_current_suffix: "{{ (ldap_db_lookup.stdout.split('|'))[1] }}"
-    ldap_current_rootdn: "{{ (ldap_db_lookup.stdout.split('|'))[2] }}"
+- name: Discover fresh cn=config state for full_import mode
+  ansible.builtin.import_tasks: discover.yml
 
 - name: Render overlay config LDIF after database discovery
   ansible.builtin.template:
@@ -49,7 +8,7 @@
     dest: "{{ ldap_runtime_ldif_dir }}/overlay-config.ldif"
     mode: "0644"
 
-- name: Hash admin password for optional rootDN reset
+- name: Hash admin password for rootDN reset
   ansible.builtin.command:
     argv:
       - docker
@@ -73,7 +32,7 @@
   when:
     - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
-- name: Update LDAP suffix, rootDN and rootPW when requested
+- name: Update LDAP suffix, rootDN and rootPW for full_import
   ansible.builtin.command:
     argv:
       - docker
@@ -107,100 +66,6 @@
   loop: "{{ ldap_migration_config_ldifs }}"
   when: ldap_migration_config_ldifs | length > 0
 
-- name: Check whether the base DN already exists
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapsearch
-      - -x
-      - -D
-      - "{{ ldap_admin_dn }}"
-      - -w
-      - "{{ ldap_admin_password }}"
-      - -H
-      - ldap://127.0.0.1
-      - -LLL
-      - -b
-      - "{{ ldap_base_dn }}"
-      - -s
-      - base
-      - "(objectClass=*)"
-      - dn
-  register: ldap_base_entry_check
-  changed_when: false
-  failed_when: false
-  when: ldap_tree_bootstrap_enabled | default(true) | bool
-
-- name: Create base DN entry when missing
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapadd
-      - -x
-      - -D
-      - "{{ ldap_admin_dn }}"
-      - -w
-      - "{{ ldap_admin_password }}"
-      - -H
-      - ldap://127.0.0.1
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/ldif/base-entry.ldif"
-  when:
-    - ldap_tree_bootstrap_enabled | default(true) | bool
-    - "ldap_base_entry_check.rc != 0 or 'dn: ' not in ldap_base_entry_check.stdout"
-
-- name: Check required OU entries
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapsearch
-      - -x
-      - -D
-      - "{{ ldap_admin_dn }}"
-      - -w
-      - "{{ ldap_admin_password }}"
-      - -H
-      - ldap://127.0.0.1
-      - -LLL
-      - -b
-      - "ou={{ item }},{{ ldap_base_dn }}"
-      - -s
-      - base
-      - "(objectClass=*)"
-      - dn
-  loop: "{{ ldap_base_ous }}"
-  register: ldap_ou_checks
-  changed_when: false
-  failed_when: false
-  when: ldap_tree_bootstrap_enabled | default(true) | bool
-
-- name: Create missing OU entries
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapadd
-      - -x
-      - -D
-      - "{{ ldap_admin_dn }}"
-      - -w
-      - "{{ ldap_admin_password }}"
-      - -H
-      - ldap://127.0.0.1
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/ldif/ou-{{ item.item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
-  loop: "{{ ldap_ou_checks.results }}"
-  when:
-    - ldap_tree_bootstrap_enabled | default(true) | bool
-    - "item.rc != 0 or 'dn: ' not in item.stdout"
-
 - name: Import bundled YubiKey schema idempotently
   ansible.builtin.include_tasks: schema_import.yml
   vars:
@@ -218,28 +83,43 @@
     ldap_schema_import_src_path: "{{ ldap_additional_schema_item if ldap_additional_schema_item.startswith('/') else repo_root ~ '/' ~ ldap_additional_schema_item }}"
   when: ldap_additional_schema_ldifs | length > 0
 
-- name: Check whether ykbind module is already loaded
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapsearch
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -LLL
-      - -b
-      - cn=config
-      - "(objectClass=olcModuleList)"
-      - dn
-      - olcModuleLoad
-      - olcModulePath
-  register: ldap_module_check
+- name: Read existing module list state
+  ansible.builtin.shell: >
+    docker exec {{ ldap_container_name }} sh -lc
+    "ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config '(objectClass=olcModuleList)'
+    dn olcModulePath olcModuleLoad |
+    awk '
+      BEGIN { first=1 }
+      /^dn: / {
+        if (first) {
+          sub(/^dn: /, \"\", \$0); print \"dn=\" \$0; first=0
+        }
+      }
+      /^olcModulePath: / {
+        sub(/^olcModulePath: /, \"\", \$0); print \"path=\" \$0
+      }
+      /^olcModuleLoad: / {
+        sub(/^olcModuleLoad: /, \"\", \$0); print \"load=\" \$0
+      }
+    '"
+  register: ldap_module_state
   changed_when: false
   when: ldap_module_build_enabled | bool
+
+- name: Store module list facts
+  ansible.builtin.set_fact:
+    ldap_module_config_dn: "{{ (ldap_module_state.stdout_lines | select('match', '^dn=') | list | first | default('dn=cn=module{0},cn=config')) | regex_replace('^dn=', '') }}"
+    ldap_module_config_exists: "{{ (ldap_module_state.stdout_lines | select('match', '^dn=') | list | length) > 0 }}"
+    ldap_module_path_present: "{{ (ldap_module_state.stdout_lines | select('match', '^path=') | list | length) > 0 }}"
+    ldap_module_loaded: "{{ ldap_container_module_name in ((ldap_module_state.stdout_lines | select('match', '^load=') | map('regex_replace', '^load=', '') | list) | join('\n')) }}"
+  when: ldap_module_build_enabled | bool
+
+- name: Render module load LDIF
+  ansible.builtin.template:
+    src: module-load.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/module-load.ldif"
+    mode: "0644"
+  when: (ldap_module_build_enabled | bool) and not (ldap_module_loaded | default(false) | bool)
 
 - name: Load ykbind module in cn=config
   ansible.builtin.command:
@@ -255,7 +135,7 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/module-load.ldif"
-  when: (ldap_module_build_enabled | bool) and ldap_container_module_name not in (ldap_module_check.stdout | default(''))
+  when: (ldap_module_build_enabled | bool) and not (ldap_module_loaded | default(false) | bool)
 
 - name: Check whether ykbind overlay is already configured
   ansible.builtin.command:
@@ -292,7 +172,7 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/overlay-config.ldif"
-  when: "(ldap_module_build_enabled | bool) and 'dn: ' not in (ldap_overlay_check.stdout | default(''))"
+  when: "(ldap_module_build_enabled | bool) and ('dn: ' not in (ldap_overlay_check.stdout | default('')))"
 
 - name: Check that TLS files exist on the target host
   ansible.builtin.stat:

@@ -1,5 +1,5 @@
 ---
-- name: Stop OpenLDAP container before requested full import reset
+- name: Stop OpenLDAP container before full_import reset
   ansible.builtin.command:
     argv:
       - docker
@@ -8,11 +8,9 @@
   register: ldap_reset_stop_container
   changed_when: ldap_reset_stop_container.rc == 0
   failed_when: false
-  when:
-    - ldap_full_import_requested | default(false) | bool
-    - ldap_reset_before_full_import | bool
+  when: ldap_full_import_requested | bool
 
-- name: Remove OpenLDAP container before requested full import reset
+- name: Remove OpenLDAP container before full_import reset
   ansible.builtin.command:
     argv:
       - docker
@@ -21,28 +19,22 @@
   register: ldap_reset_remove_container
   changed_when: ldap_reset_remove_container.rc == 0
   failed_when: false
-  when:
-    - ldap_full_import_requested | default(false) | bool
-    - ldap_reset_before_full_import | bool
+  when: ldap_full_import_requested | bool
 
-- name: Remove persistent LDAP data/config directories before requested full import reset
+- name: Remove persistent LDAP data/config directories before full_import
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - "{{ ldap_data_dir }}"
     - "{{ ldap_config_dir }}"
-  when:
-    - ldap_full_import_requested | default(false) | bool
-    - ldap_reset_before_full_import | bool
+  when: ldap_full_import_requested | bool
 
-- name: Show full import reset target paths
+- name: Show reset target paths for full_import
   ansible.builtin.debug:
     msg:
-      - "Reset requested for full import."
-      - "Removed persistent data dir: {{ ldap_data_dir }}"
-      - "Removed persistent config dir: {{ ldap_config_dir }}"
-      - "Deploy root remains: {{ ldap_deploy_root }}"
-  when:
-    - ldap_full_import_requested | default(false) | bool
-    - ldap_reset_before_full_import | bool
+      - "full_import mode reset completed."
+      - "Persistent data dir removed: {{ ldap_data_dir }}"
+      - "Persistent config dir removed: {{ ldap_config_dir }}"
+      - "Deploy root preserved: {{ ldap_deploy_root }}"
+  when: ldap_full_import_requested | bool
