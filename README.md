@@ -378,6 +378,26 @@ ansible-playbook playbooks/deploy-openldap.yml \
   -e ldap_ldif_import_file=exports/full-tree.ldif
 ```
 
+Teljes próba egy új távoli hostra, meglévő schema és full-tree fájlokkal:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  --limit ldap_new_host \
+  -Kk \
+  -e ldap_deploy_mode=migration \
+  -e ldap_domain=example.org \
+  -e ldap_base_dn=dc=example,dc=org \
+  -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
+  -e ldap_admin_password='<set-admin-password>' \
+  -e ldap_container_base_image=debian:trixie \
+  -e ldap_ldif_filter_enabled=true \
+  -e ldap_ldif_drop_subtrees='["ou=dns,dc=example,dc=org"]' \
+  -e ldap_additional_schema_ldifs='["schema/custom.ldif","schema/legacy-app.ldif"]' \
+  -e ldap_migration_config_ldifs='["exports/migration-config.ldif"]' \
+  -e ldap_ldif_import_file=exports/full-tree.ldif
+```
+
 A `ldap_migration_config_ldifs` opcionális. Ha nincs hordozható config módosítás, hagyd üresen. A `ldap_additional_schema_ldifs` listába csak olyan schema LDIF kerüljön, amely a cél OpenLDAP-ban ténylegesen betölthető. Ne add meg a teljes `source-schema.reference.ldif` fájlt importként; abból csak a ténylegesen hiányzó custom schema entryket exportáld külön. A régi DNS backendhez tartozó schema és adat ne kerüljön be, ha a céloldalon nincs hozzá backend/plugin támogatás.
 
 A migrációs config LDIF-ek legyenek újrafuttatható `changetype: modify` jellegű módosítások, vagy csak egyszer használt, dokumentált lépések. Teljes `cn=config` dump automatikus visszatöltése nem cél, mert túl sok környezetfüggő elemet tartalmaz.
@@ -454,7 +474,7 @@ Fő pontok:
 - a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
 - a kész image a control node-on tarballként exportálódik
 - a tarball a cél LDAP hostra kerül és ott `docker load` importálja
-- a playbook utána betölti a modult a `cn=module{0},cn=config` alá
+- a playbook utána ellenőrzi a `cn=config` alatti module listákat, és csak akkor tölti be a modult, ha még nincs jelen
 - végül felveszi az overlayt a fő adatbázisra
 
 Ha kézzel akarod debugolni a buildet, a legegyszerűbb a control node-on az Ansible által kirakott build contextet használni:
@@ -485,6 +505,8 @@ A deploy során a role:
 - opcionálisan migrációs config LDIF-eket alkalmaz a `ldap_migration_config_ldifs` listából
 - szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
 - opcionálisan TLS fájlútvonalakat konfigurál a `cn=config` alatt
+
+A schema import nem fix `cn={N}` indexre támaszkodik. A role minden schema import előtt kiolvassa a teljes `cn=schema,cn=config` tartalmat, majd a betöltendő LDIF `olcAttributeTypes` és `olcObjectClasses` OID-jait hasonlítja össze a meglévő állapottal. Ha minden OID már jelen van, az import kimarad; ha csak részleges egyezés van, a playbook hibával megáll, mert az `ldapadd` ilyen esetben `duplicate attributeType` hibával bukna.
 
 Az entrypoint init módjai:
 

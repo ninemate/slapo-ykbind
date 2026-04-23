@@ -1,0 +1,72 @@
+---
+- name: Read current cn=config schema before {{ ldap_schema_import_label }}
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -b
+      - cn=schema,cn=config
+      - "(objectClass=olcSchemaConfig)"
+      - dn
+      - cn
+      - olcAttributeTypes
+      - olcObjectClasses
+  register: ldap_schema_current_dump
+  changed_when: false
+
+- name: Store current schema dump for {{ ldap_schema_import_label }}
+  ansible.builtin.copy:
+    content: "{{ ldap_schema_current_dump.stdout }}\n"
+    dest: "{{ ldap_local_artifact_root }}/schema-current-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: Check schema import state for {{ ldap_schema_import_label }}
+  ansible.builtin.command:
+    argv:
+      - "{{ repo_root }}/tools/check-schema-ldif-state.sh"
+      - --schema-ldif
+      - "{{ ldap_schema_import_src_path }}"
+      - --current-ldif
+      - "{{ ldap_local_artifact_root }}/schema-current-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+  register: ldap_schema_import_state
+  changed_when: false
+  delegate_to: localhost
+  become: false
+
+- name: Show schema import decision for {{ ldap_schema_import_label }}
+  ansible.builtin.debug:
+    msg: "{{ ldap_schema_import_state.stdout_lines }}"
+
+- name: Fail on conflicting schema definitions for {{ ldap_schema_import_label }}
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to import {{ ldap_schema_import_label }} from {{ ldap_schema_import_src_path }}:
+      existing cn=schema,cn=config contains only part of this schema or a same-name schema
+      with different definitions. State: {{ ldap_schema_import_state.stdout_lines }}
+  when: "'state=conflict' in ldap_schema_import_state.stdout or 'state=invalid' in ldap_schema_import_state.stdout"
+
+- name: Import schema into cn=config for {{ ldap_schema_import_label }}
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_schema_import_container_path }}"
+  when: "'state=missing' in ldap_schema_import_state.stdout"

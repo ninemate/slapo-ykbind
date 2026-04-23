@@ -201,81 +201,24 @@
     - ldap_tree_bootstrap_enabled | default(true)
     - "item.rc != 0 or 'dn: ' not in item.stdout"
 
-- name: Check whether bundled YubiKey schema is already loaded
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapsearch
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -LLL
-      - -b
-      - cn=schema,cn=config
-      - "(cn={{ ldap_container_schema_name }})"
-      - dn
-  register: ldap_yubikey_schema_check
-  changed_when: false
-  failed_when: false
+- name: Import bundled YubiKey schema idempotently
+  ansible.builtin.include_tasks: schema_import.yml
+  vars:
+    ldap_schema_import_label: bundled-yubikey
+    ldap_schema_import_src_path: "{{ repo_root }}/schema/yubikey-otp.ldif"
+    ldap_schema_import_container_path: "{{ ldap_container_bootstrap_dir }}/schema/yubikey-otp.ldif"
 
-- name: Import bundled YubiKey schema into cn=config
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapadd
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/schema/yubikey-otp.ldif"
-  when: "'dn: ' not in ldap_yubikey_schema_check.stdout"
-
-- name: Check optional extra schema LDIF files
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapsearch
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -LLL
-      - -b
-      - cn=schema,cn=config
-      - "(cn={{ item | basename | regex_replace('\\.ldif$', '') }})"
-      - dn
+- name: Import optional extra schema LDIF files idempotently
+  ansible.builtin.include_tasks: schema_import.yml
   loop: "{{ ldap_additional_schema_ldifs }}"
-  register: ldap_extra_schema_checks
-  changed_when: false
+  loop_control:
+    loop_var: ldap_additional_schema_item
+    label: "{{ ldap_additional_schema_item }}"
+  vars:
+    ldap_schema_import_label: "extra-{{ ldap_additional_schema_item | basename | regex_replace('\\.ldif$', '') }}"
+    ldap_schema_import_src_path: "{{ ldap_additional_schema_item if ldap_additional_schema_item.startswith('/') else repo_root ~ '/' ~ ldap_additional_schema_item }}"
+    ldap_schema_import_container_path: "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_additional_schema_item | basename }}"
   when: ldap_additional_schema_ldifs | length > 0
-
-- name: Import missing extra schema LDIF files
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapadd
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/schema/{{ item.item | basename }}"
-  loop: "{{ ldap_extra_schema_checks.results | default([]) }}"
-  when: "'dn: ' not in item.stdout"
 
 - name: Check whether ykbind module is already loaded
   ansible.builtin.command:
@@ -291,11 +234,11 @@
       - ldapi:///
       - -LLL
       - -b
-      - cn=module{0},cn=config
-      - -s
-      - base
-      - "(objectClass=*)"
+      - cn=config
+      - "(objectClass=olcModuleList)"
+      - dn
       - olcModuleLoad
+      - olcModulePath
   register: ldap_module_check
   changed_when: false
   when: ldap_module_build_enabled
