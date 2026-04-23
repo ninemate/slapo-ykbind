@@ -506,7 +506,7 @@ A deploy során a role:
 - szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
 - opcionálisan TLS fájlútvonalakat konfigurál a `cn=config` alatt
 
-A schema import nem fix `cn={N}` indexre támaszkodik. A role minden schema import előtt kiolvassa a teljes `cn=schema,cn=config` tartalmat, majd a betöltendő LDIF `olcAttributeTypes` és `olcObjectClasses` OID-jait hasonlítja össze a meglévő állapottal. Ha minden OID már jelen van, az import kimarad; ha csak részleges egyezés van, a playbook hibával megáll, mert az `ldapadd` ilyen esetben `duplicate attributeType` hibával bukna.
+A schema import nem fix `cn={N}` indexre támaszkodik. A role minden schema import előtt kiolvassa a teljes `cn=schema,cn=config` tartalmat, majd a betöltendő LDIF-et schema entrynként hasonlítja össze a meglévő állapottal. Egy teljes forrásoldali `cn=schema,cn=config` dump is megadható: a már meglévő beépített schema entryk kimaradnak, és csak a teljesen hiányzó custom schema entryk kerülnek egy szűrt import LDIF-be. Ha egy hiányzó nevű entry OID-jai részben már léteznek más schema alatt, a playbook hibával megáll, mert az `ldapadd` ilyen esetben `duplicate attributeType` hibával bukna.
 
 Az entrypoint init módjai:
 

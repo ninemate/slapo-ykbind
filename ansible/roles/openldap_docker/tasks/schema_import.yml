@@ -38,6 +38,8 @@
       - "{{ ldap_schema_import_src_path }}"
       - --current-ldif
       - "{{ ldap_local_artifact_root }}/schema-current-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+      - --output-import-ldif
+      - "{{ ldap_local_artifact_root }}/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
   register: ldap_schema_import_state
   changed_when: false
   delegate_to: localhost
@@ -51,9 +53,16 @@
   ansible.builtin.fail:
     msg: >-
       Refusing to import {{ ldap_schema_import_label }} from {{ ldap_schema_import_src_path }}:
-      existing cn=schema,cn=config contains only part of this schema or a same-name schema
-      with different definitions. State: {{ ldap_schema_import_state.stdout_lines }}
+      existing cn=schema,cn=config already contains some OIDs from a schema entry
+      that does not exist by name. State: {{ ldap_schema_import_state.stdout_lines }}
   when: "'state=conflict' in ldap_schema_import_state.stdout or 'state=invalid' in ldap_schema_import_state.stdout"
+
+- name: Copy prepared schema import LDIF for {{ ldap_schema_import_label }}
+  ansible.builtin.copy:
+    src: "{{ ldap_local_artifact_root }}/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+    dest: "{{ ldap_runtime_schema_dir }}/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+    mode: "0644"
+  when: "'state=missing' in ldap_schema_import_state.stdout"
 
 - name: Import schema into cn=config for {{ ldap_schema_import_label }}
   ansible.builtin.command:
@@ -68,5 +77,5 @@
       - -H
       - ldapi:///
       - -f
-      - "{{ ldap_schema_import_container_path }}"
+      - "{{ ldap_container_bootstrap_dir }}/schema/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
   when: "'state=missing' in ldap_schema_import_state.stdout"

@@ -206,7 +206,6 @@
   vars:
     ldap_schema_import_label: bundled-yubikey
     ldap_schema_import_src_path: "{{ repo_root }}/schema/yubikey-otp.ldif"
-    ldap_schema_import_container_path: "{{ ldap_container_bootstrap_dir }}/schema/yubikey-otp.ldif"
 
 - name: Import optional extra schema LDIF files idempotently
   ansible.builtin.include_tasks: schema_import.yml
@@ -217,7 +216,6 @@
   vars:
     ldap_schema_import_label: "extra-{{ ldap_additional_schema_item | basename | regex_replace('\\.ldif$', '') }}"
     ldap_schema_import_src_path: "{{ ldap_additional_schema_item if ldap_additional_schema_item.startswith('/') else repo_root ~ '/' ~ ldap_additional_schema_item }}"
-    ldap_schema_import_container_path: "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_additional_schema_item | basename }}"
   when: ldap_additional_schema_ldifs | length > 0
 
 - name: Check whether ykbind module is already loaded
