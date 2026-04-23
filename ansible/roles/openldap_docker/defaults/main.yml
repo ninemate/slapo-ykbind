@@ -74,6 +74,7 @@ ldap_bootstrap_ldif_file: ""
 ldap_ldif_import_enabled: false
 ldap_ldif_import_file: ""
 ldap_force_full_import: false
+ldap_reset_before_full_import: false
 ldap_ldif_filter_enabled: true
 ldap_ldif_drop_subtrees:
   - "ou=dns,{{ ldap_base_dn }}"

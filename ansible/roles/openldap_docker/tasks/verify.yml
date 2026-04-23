@@ -59,7 +59,7 @@
       - dn
   register: ldap_overlay_smoke_check
   changed_when: false
-  when: ldap_module_build_enabled
+  when: ldap_module_build_enabled | bool
 
 - name: Optional smoke test for a specific user DN
   ansible.builtin.command:
@@ -84,4 +84,3 @@
       - dn
   changed_when: false
   when: ldap_smoke_test_user_dn | length > 0
-

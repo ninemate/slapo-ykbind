@@ -61,7 +61,7 @@
   register: ldap_admin_password_hash_cmd
   changed_when: false
   when:
-    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
 - name: Render database config update LDIF
   ansible.builtin.template:
@@ -71,7 +71,7 @@
   vars:
     ldap_admin_password_hash: "{{ ldap_admin_password_hash_cmd.stdout }}"
   when:
-    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
 - name: Update LDAP suffix, rootDN and rootPW when requested
   ansible.builtin.command:
@@ -88,7 +88,7 @@
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/database-config.ldif"
   when:
-    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or ldap_force_password_reset
+    - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
 - name: Apply optional migration config LDIFs
   ansible.builtin.command:
@@ -131,7 +131,7 @@
   register: ldap_base_entry_check
   changed_when: false
   failed_when: false
-  when: ldap_tree_bootstrap_enabled | default(true)
+  when: ldap_tree_bootstrap_enabled | default(true) | bool
 
 - name: Create base DN entry when missing
   ansible.builtin.command:
@@ -150,7 +150,7 @@
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/base-entry.ldif"
   when:
-    - ldap_tree_bootstrap_enabled | default(true)
+    - ldap_tree_bootstrap_enabled | default(true) | bool
     - "ldap_base_entry_check.rc != 0 or 'dn: ' not in ldap_base_entry_check.stdout"
 
 - name: Check required OU entries
@@ -178,7 +178,7 @@
   register: ldap_ou_checks
   changed_when: false
   failed_when: false
-  when: ldap_tree_bootstrap_enabled | default(true)
+  when: ldap_tree_bootstrap_enabled | default(true) | bool
 
 - name: Create missing OU entries
   ansible.builtin.command:
@@ -198,7 +198,7 @@
       - "{{ ldap_container_bootstrap_dir }}/ldif/ou-{{ item.item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
   loop: "{{ ldap_ou_checks.results }}"
   when:
-    - ldap_tree_bootstrap_enabled | default(true)
+    - ldap_tree_bootstrap_enabled | default(true) | bool
     - "item.rc != 0 or 'dn: ' not in item.stdout"
 
 - name: Import bundled YubiKey schema idempotently
@@ -239,7 +239,7 @@
       - olcModulePath
   register: ldap_module_check
   changed_when: false
-  when: ldap_module_build_enabled
+  when: ldap_module_build_enabled | bool
 
 - name: Load ykbind module in cn=config
   ansible.builtin.command:
@@ -255,7 +255,7 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/module-load.ldif"
-  when: ldap_module_build_enabled and ldap_container_module_name not in (ldap_module_check.stdout | default(''))
+  when: (ldap_module_build_enabled | bool) and ldap_container_module_name not in (ldap_module_check.stdout | default(''))
 
 - name: Check whether ykbind overlay is already configured
   ansible.builtin.command:
@@ -276,7 +276,7 @@
       - dn
   register: ldap_overlay_check
   changed_when: false
-  when: ldap_module_build_enabled
+  when: ldap_module_build_enabled | bool
 
 - name: Configure ykbind overlay on the main database
   ansible.builtin.command:
@@ -292,7 +292,7 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/overlay-config.ldif"
-  when: "ldap_module_build_enabled and 'dn: ' not in (ldap_overlay_check.stdout | default(''))"
+  when: "(ldap_module_build_enabled | bool) and 'dn: ' not in (ldap_overlay_check.stdout | default(''))"
 
 - name: Check that TLS files exist on the target host
   ansible.builtin.stat:
@@ -302,12 +302,12 @@
     - "{{ ldap_tls_host_dir }}/tls.key"
     - "{{ ldap_tls_host_dir }}/ca.crt"
   register: ldap_tls_file_stats
-  when: ldap_enable_ldaps
+  when: ldap_enable_ldaps | bool
 
 - name: Fail when LDAPS is enabled but TLS files are missing
   ansible.builtin.fail:
     msg: "LDAPS engedélyezve van, de hiányzik legalább egy fájl a {{ ldap_tls_host_dir }} könyvtárból."
-  when: ldap_enable_ldaps and (ldap_tls_file_stats.results | default([]) | selectattr('stat.exists', 'equalto', false) | list | length > 0)
+  when: (ldap_enable_ldaps | bool) and (ldap_tls_file_stats.results | default([]) | selectattr('stat.exists', 'equalto', false) | list | length > 0)
 
 - name: Read current TLS configuration
   ansible.builtin.command:
@@ -332,7 +332,7 @@
       - olcTLSCertificateKeyFile
   register: ldap_tls_config_check
   changed_when: false
-  when: ldap_enable_ldaps
+  when: ldap_enable_ldaps | bool
 
 - name: Configure TLS paths in cn=config
   ansible.builtin.command:
@@ -348,4 +348,4 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/tls-config.ldif"
-  when: ldap_enable_ldaps and (ldap_tls_cert_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_key_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_ca_file not in (ldap_tls_config_check.stdout | default('')))
+  when: (ldap_enable_ldaps | bool) and (ldap_tls_cert_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_key_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_ca_file not in (ldap_tls_config_check.stdout | default('')))

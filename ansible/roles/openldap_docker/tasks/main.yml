@@ -8,6 +8,9 @@
 - name: Install host prerequisites
   ansible.builtin.import_tasks: prerequisites.yml
 
+- name: Reset target before requested full import
+  ansible.builtin.import_tasks: reset.yml
+
 - name: Create deploy directories
   ansible.builtin.import_tasks: directories.yml
 

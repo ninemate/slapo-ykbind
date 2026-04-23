@@ -31,13 +31,13 @@
   delegate_to: localhost
   become: false
   run_once: true
-  when: ldap_full_import_requested and (ldap_ldif_import_src_path | length > 0)
+  when: (ldap_full_import_requested | bool) and (ldap_ldif_import_src_path | length > 0)
 
 - name: Auto-derive base DN from import LDIF when default example DN is still used
   ansible.builtin.set_fact:
     ldap_base_dn: "{{ ldap_first_import_dn_cmd.stdout | trim }}"
   when:
-    - ldap_full_import_requested
+    - ldap_full_import_requested | bool
     - (ldap_first_import_dn_cmd.stdout | default('') | trim | length) > 0
     - ldap_base_dn == 'dc=example,dc=org'
 
@@ -45,7 +45,7 @@
   ansible.builtin.set_fact:
     ldap_admin_dn: "cn=admin,{{ ldap_base_dn }}"
   when:
-    - ldap_full_import_requested
+    - ldap_full_import_requested | bool
     - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
 
 - name: Set effective init and tree bootstrap facts

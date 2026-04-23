@@ -391,6 +391,7 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
   -e ldap_admin_password='<set-admin-password>' \
   -e ldap_container_base_image=debian:trixie \
+  -e ldap_reset_before_full_import=true \
   -e ldap_ldif_filter_enabled=true \
   -e ldap_ldif_drop_subtrees='["ou=dns,dc=example,dc=org"]' \
   -e ldap_additional_schema_ldifs='["schema/custom.ldif","schema/legacy-app.ldif"]' \
@@ -418,7 +419,8 @@ Fontos restore megjegyzések:
 
 - a full restore nem merge mechanizmus, hanem üres céladatbázisba történő betöltés
 - ha a base DN már létezik, a playbook megáll, mert az import biztosan ütközne
-- meglévő céladatbázis migrációjához előbb szándékosan üríteni kell a perzisztens `data/` és `config/` köteteket, majd újra futtatni a playbookot
+- meglévő céladatbázis migrációjához előbb szándékosan üríteni kell a perzisztens `data/` és `config/` köteteket, vagy a futtatásnál meg kell adni: `-e ldap_reset_before_full_import=true`
+- a reset a `ldap_data_dir` és `ldap_config_dir` útvonalakat törli, alapértelmezésben `/opt/openldap-ykbind/data` és `/opt/openldap-ykbind/config`; figyelj arra, hogy ne elírt deploy rootot törölj kézzel
 - relatív LDIF útvonalakat a role a repository gyökeréhez viszonyítva old fel
 
 Idempotencia megjegyzés:

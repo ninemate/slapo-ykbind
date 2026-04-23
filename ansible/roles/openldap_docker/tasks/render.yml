@@ -20,7 +20,7 @@
       dest: ca.crt
       mode: "0644"
   when:
-    - ldap_enable_ldaps
+    - ldap_enable_ldaps | bool
     - item.src | length > 0
 
 - name: Copy additional schema LDIFs to target host

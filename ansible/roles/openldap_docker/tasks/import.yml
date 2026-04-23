@@ -4,7 +4,7 @@
     that:
       - ldap_bootstrap_ldif_file | length == 0
     fail_msg: "ldap_bootstrap_ldif_file is for fresh deploys only; do not combine it with full-tree migration."
-  when: ldap_full_import_requested | default(false)
+  when: ldap_full_import_requested | default(false) | bool
 
 - name: Copy optional bootstrap LDIF to target host
   ansible.builtin.copy:
@@ -50,7 +50,7 @@
     that:
       - ldap_ldif_import_file | length > 0
     fail_msg: "Full-tree import is enabled, but ldap_ldif_import_file is empty."
-  when: ldap_full_import_requested | default(false)
+  when: ldap_full_import_requested | default(false) | bool
 
 - name: Filter unsupported entries from full-tree LDIF on control node
   ansible.builtin.shell: |
@@ -71,26 +71,26 @@
   run_once: true
   changed_when: true
   when:
-    - ldap_full_import_requested | default(false)
+    - ldap_full_import_requested | default(false) | bool
     - ldap_ldif_filter_enabled | bool
 
 - name: Select effective full-tree LDIF source
   ansible.builtin.set_fact:
     ldap_effective_ldif_import_src_path: "{{ (ldap_ldif_filter_enabled | bool) | ternary(ldap_local_artifact_root ~ '/full-tree.filtered.ldif', ldap_ldif_import_src_path) }}"
-  when: ldap_full_import_requested | default(false)
+  when: ldap_full_import_requested | default(false) | bool
 
 - name: Copy full tree LDIF to target host
   ansible.builtin.copy:
     src: "{{ ldap_effective_ldif_import_src_path }}"
     dest: "{{ ldap_runtime_import_dir }}/full-tree.ldif"
     mode: "0644"
-  when: ldap_full_import_requested | default(false)
+  when: ldap_full_import_requested | default(false) | bool
 
 - name: Check full tree import marker
   ansible.builtin.stat:
     path: "{{ ldap_full_import_marker }}"
   register: ldap_full_import_marker_stat
-  when: ldap_full_import_requested | default(false)
+  when: ldap_full_import_requested | default(false) | bool
 
 - name: Check whether the base DN already exists before full restore
   ansible.builtin.command:
@@ -116,13 +116,21 @@
   register: ldap_full_restore_base_precheck
   changed_when: false
   failed_when: false
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Stop full restore when the target tree is not empty
   ansible.builtin.fail:
-    msg: "Full-tree restore needs a virgin target database. Use ldap_deploy_mode=migration with empty data/config directories, or wipe the target volumes intentionally before retrying."
+    msg: >-
+      Full-tree restore needs a virgin target database, but ldapsearch found
+      {{ ldap_base_dn }} before slapadd. Precheck output:
+      {{ ldap_full_restore_base_precheck.stdout | default('') }}.
+      The persistent bind-mount directories are data={{ ldap_data_dir }} and
+      config={{ ldap_config_dir }} under deploy_root={{ ldap_deploy_root }}.
+      Use ldap_deploy_mode=migration with empty data/config directories, or
+      rerun with ldap_reset_before_full_import=true to stop/remove the container
+      and wipe those two persistent directories before initialization.
   when:
-    - ldap_full_import_requested | default(false)
+    - ldap_full_import_requested | default(false) | bool
     - not (ldap_full_import_marker_stat.stat.exists | default(false))
     - not (ldap_force_full_import | bool)
     - "'dn: ' in (ldap_full_restore_base_precheck.stdout | default(''))"
@@ -133,7 +141,7 @@
       - docker
       - stop
       - "{{ ldap_container_name }}"
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Import full tree LDIF with offline slapadd
   ansible.builtin.command:
@@ -152,7 +160,7 @@
       - "1"
       - -l
       - "{{ ldap_container_bootstrap_dir }}/ldif/imports/full-tree.ldif"
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Fix LDAP DB ownership after offline slapadd
   ansible.builtin.command:
@@ -168,7 +176,7 @@
       - -R
       - openldap:openldap
       - /var/lib/ldap
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Start OpenLDAP container after full tree restore
   ansible.builtin.command:
@@ -179,18 +187,18 @@
       - up
       - -d
     chdir: "{{ ldap_deploy_root }}"
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Wait for LDAP TCP listener after full restore
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: "{{ ldap_listen_port }}"
     timeout: 90
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
 
 - name: Mark full tree import as done
   ansible.builtin.file:
     path: "{{ ldap_full_import_marker }}"
     state: touch
     mode: "0644"
-  when: ldap_full_import_requested | default(false) and not (ldap_full_import_marker_stat.stat.exists | default(false))
+  when: (ldap_full_import_requested | default(false) | bool) and not (ldap_full_import_marker_stat.stat.exists | default(false))
