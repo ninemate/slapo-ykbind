@@ -449,6 +449,7 @@ Fő pontok:
 - Debian 13 alapú multi-stage Docker build
 - `apt-get source openldap`
 - a szükséges build dependency-ket explicit Debian csomaglistából telepíti
+- a builder stage OpenLDAP forrásból futtatott `configure`, `make depend` és `make -C include` lépéssel állítja elő a modulhoz szükséges `portable.h`, `ldap_features.h` és `ldap_config.h` headereket
 - a repositoryban lévő [Makefile](/home/username/Documents/yubik/Makefile) fut
 - a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
 - a kész image a control node-on tarballként exportálódik

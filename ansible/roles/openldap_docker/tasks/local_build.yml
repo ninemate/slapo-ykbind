@@ -8,7 +8,6 @@
     - "{{ ldap_local_artifact_root }}"
     - "{{ ldap_local_build_context_dir }}"
     - "{{ ldap_local_build_context_dir }}/module"
-    - "{{ ldap_local_build_context_dir }}/module/patches"
   delegate_to: localhost
   become: false
   run_once: true
@@ -45,8 +44,6 @@
       dest: "{{ ldap_local_build_context_dir }}/module/Makefile"
     - src: "{{ repo_root }}/slapo-ykbind.c"
       dest: "{{ ldap_local_build_context_dir }}/module/slapo-ykbind.c"
-    - src: "{{ repo_root }}/patches/openldap-2.6.10-sasl-getconfpath-guard.patch"
-      dest: "{{ ldap_local_build_context_dir }}/module/patches/openldap-2.6.10-sasl-getconfpath-guard.patch"
   delegate_to: localhost
   become: false
   run_once: true

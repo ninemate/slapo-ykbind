@@ -27,10 +27,10 @@ RUN set -eux; \
       build-essential \
       ca-certificates \
       dpkg-dev \
+      file \
       libldap-dev \
       libsasl2-dev \
       libssl-dev \
-      patch \
       pkg-config; \
     if [ "${LDAP_MODULE_BUILD_ENABLED}" = "true" ]; then \
       cd /usr/src; \
@@ -46,20 +46,19 @@ RUN set -eux; \
       cd /usr/src; \
       srcdir="$(find /usr/src -maxdepth 1 -mindepth 1 -type d -name 'openldap-*' | sort | head -n 1)"; \
       [ -n "${srcdir}" ]; \
-      if [ -f /usr/src/ykbind/patches/openldap-2.6.10-sasl-getconfpath-guard.patch ]; then \
-        patch -d "${srcdir}" -p1 < /usr/src/ykbind/patches/openldap-2.6.10-sasl-getconfpath-guard.patch || true; \
-      fi; \
-      if [ -f "${srcdir}/build/ldap_config.h" ] || [ -f "${srcdir}/build/include/ldap_config.h" ]; then \
+      if [ -f "${srcdir}/build/include/portable.h" ] && [ -f "${srcdir}/build/include/ldap_features.h" ]; then \
         builddir="${srcdir}/build"; \
       else \
         builddir="/usr/src/openldap-build"; \
         mkdir -p "${builddir}"; \
         cd "${builddir}"; \
         "${srcdir}/configure"; \
+        make depend; \
+        make -C include; \
       fi; \
-      if [ ! -f "${builddir}/ldap_config.h" ] && [ ! -f "${builddir}/include/ldap_config.h" ]; then \
-        echo "ldap_config.h not found under ${builddir}" >&2; \
-        find "${builddir}" -maxdepth 3 \( -name ldap_config.h -o -name portable.h -o -name ldap_features.h \) -print >&2 || true; \
+      if [ ! -f "${builddir}/include/portable.h" ] || [ ! -f "${builddir}/include/ldap_features.h" ] || [ ! -f "${builddir}/include/ldap_config.h" ]; then \
+        echo "OpenLDAP generated headers not found under ${builddir}/include" >&2; \
+        find "${builddir}" -maxdepth 3 \( -name portable.h -o -name ldap_features.h -o -name ldap_config.h \) -print >&2 || true; \
         exit 1; \
       fi; \
       cd /usr/src/ykbind; \
@@ -85,7 +84,6 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
 
 COPY noCheckValidUntil /etc/apt/apt.conf.d/noCheckValidUntil
-COPY syslog-ng.conf /etc/syslog-ng/syslog-ng.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY healthcheck.sh /healthcheck.sh
 
@@ -98,6 +96,7 @@ RUN set -eux; \
     mkdir -p /opt/openldap/bootstrap /var/log/slapd; \
     chmod +x /entrypoint.sh /healthcheck.sh
 
+COPY syslog-ng.conf /etc/syslog-ng/syslog-ng.conf
 COPY --from=builder /build-out/usr/lib/ldap/ /usr/lib/ldap/
 
 EXPOSE 389 636
