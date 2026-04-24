@@ -6,6 +6,12 @@ server inner-tunnel {
   }
 
   authorize {
+    if (&CHAP-Password || &MS-CHAP-Challenge || &MS-CHAP-Response) {
+      update reply {
+        Reply-Message := "Use PAP for LDAP-backed tunneled RADIUS login"
+      }
+      reject
+    }
     chap
     mschap
     suffix
@@ -14,7 +20,7 @@ server inner-tunnel {
     }
     files
     ldap
-    if ((ok || updated) && User-Password) {
+    if ((ok || updated) && &User-Password) {
       update control {
         Auth-Type := LDAP
       }
@@ -45,6 +51,10 @@ server inner-tunnel {
   }
 
   post-auth {
-    reply_log
+    ldap
+  }
+
+  Post-Auth-Type REJECT {
+    attr_filter.access_reject
   }
 }

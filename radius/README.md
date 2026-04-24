@@ -15,7 +15,7 @@ Two supported models:
      - `mods-available/ldap`
      - `sites-enabled/default`
      - `sites-enabled/inner-tunnel`
-   - or let Ansible render the LDAP module and site configs from variables
+   - or let Ansible render the LDAP module, dynamic client config, and site configs from variables
 
 Typical playbook usage with a full existing config tree:
 
@@ -35,4 +35,18 @@ ansible-playbook playbooks/deploy-openldap.yml \
   -e radius_clients_conf=radius/clients.conf \
   -e radius_ldap_bind_dn='cn=admin,dc=example,dc=org' \
   -e radius_ldap_bind_password='<set-admin-password>'
+```
+
+Typical playbook usage with fully repo-managed LDAP relay auth and LDAP-backed dynamic clients:
+
+```bash
+cd ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e radius_enabled=true \
+  -e radius_ldap_host=openldap \
+  -e radius_ldap_bind_dn='cn=admin,dc=example,dc=org' \
+  -e radius_ldap_bind_password='<set-admin-password>' \
+  -e radius_ldap_base_dn='dc=example,dc=org' \
+  -e radius_clients_base_dn='ou=radius_clients,dc=example,dc=org' \
+  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-205","ipaddr":"192.168.205.0","netmask":24},{"name":"dynamic-101","ipaddr":"192.168.101.0","netmask":24},{"name":"dynamic","ipaddr":"192.168.235.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-4000","ipaddr":"10.0.1.0","netmask":16,"require_message_authenticator":"no"}]}'
 ```

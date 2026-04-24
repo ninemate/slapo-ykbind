@@ -50,12 +50,16 @@
       {{ radius_sites_available_inner_tunnel if (radius_sites_available_inner_tunnel | length > 0 and radius_sites_available_inner_tunnel.startswith('/'))
          else (repo_root ~ '/' ~ radius_sites_available_inner_tunnel) if (radius_sites_available_inner_tunnel | length > 0)
          else '' }}
+    radius_main_config_src_path: >-
+      {{ (radius_config_src_path ~ '/radiusd.conf') if (radius_config_src_path | length > 0)
+         else radius_radiusd_conf_src_path if (radius_radiusd_conf_src_path | length > 0)
+         else '' }}
 
 - name: Set RADIUS config model facts
   ansible.builtin.set_fact:
     radius_use_full_config_tree: "{{ (radius_enabled | bool) and (radius_config_src_path | length > 0) }}"
     radius_mount_radiusd_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and (radius_radiusd_conf_src_path | length > 0) }}"
-    radius_mount_clients_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_clients_conf_src_path | length > 0) or (radius_clients | length > 0)) }}"
+    radius_mount_clients_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_clients_conf_src_path | length > 0) or (radius_clients | length > 0) or (radius_dynamic_client_networks | length > 0)) }}"
     radius_mount_ldap_module: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_mods_available_ldap_src_path | length > 0) or (radius_manage_ldap_module | bool)) }}"
     radius_mount_default_site: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_sites_available_default_src_path | length > 0) or (radius_manage_default_site | bool)) }}"
     radius_mount_inner_tunnel_site: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_sites_available_inner_tunnel_src_path | length > 0) or (radius_manage_inner_tunnel_site | bool)) }}"

@@ -43,7 +43,7 @@
   when:
     - radius_mount_clients_conf | bool
     - radius_clients_conf_src_path | length == 0
-    - radius_clients | length > 0
+    - (radius_clients | length > 0) or (radius_dynamic_client_networks | length > 0)
 
 - name: Copy external LDAP module config to target host
   ansible.builtin.copy:
@@ -68,6 +68,18 @@
   when:
     - radius_mount_ldap_module | bool
     - radius_mods_available_ldap_src_path | length == 0
+
+- name: Render managed dynamic_clients module config to target host
+  ansible.builtin.template:
+    src: freeradius-dynamic-clients-module.j2
+    dest: "{{ radius_dynamic_clients_module_host_path }}"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_dynamic_clients_module_template
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - radius_dynamic_client_networks | length > 0
 
 - name: Ensure LDAP module is enabled in the host override tree
   ansible.builtin.file:
@@ -140,6 +152,7 @@
         or (radius_ldap_module_copy.changed | default(false))
         or (radius_ldap_module_template.changed | default(false))
         or (radius_ldap_module_symlink.changed | default(false))
+        or (radius_dynamic_clients_module_template.changed | default(false))
         or (radius_default_site_copy.changed | default(false))
         or (radius_default_site_template.changed | default(false))
         or (radius_inner_tunnel_site_copy.changed | default(false))

@@ -41,6 +41,7 @@
             or (radius_sites_available_default_src_path | length > 0)
             or (radius_sites_available_inner_tunnel_src_path | length > 0)
             or (radius_clients | length > 0)
+            or (radius_dynamic_client_networks | length > 0)
           )
         )
     fail_msg: >-
@@ -62,6 +63,54 @@
       Provide radius_config_src_dir for a full existing config tree, or use the
       managed LDAP/site templates and optional clients.conf overrides.
   when: radius_enabled | bool
+
+- name: Read explicit FreeRADIUS main config user/group directives from control node
+  ansible.builtin.shell: |
+    awk '
+      match($0, /^[[:space:]]*user[[:space:]]*=[[:space:]]*([^[:space:]#]+)/, m) { print "user=" m[1] }
+      match($0, /^[[:space:]]*group[[:space:]]*=[[:space:]]*([^[:space:]#]+)/, m) { print "group=" m[1] }
+    ' "{{ radius_main_config_src_path }}"
+  args:
+    executable: /bin/bash
+  register: radius_main_config_identity_directives
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - radius_enabled | bool
+    - radius_main_config_src_path | length > 0
+
+- name: Reject incompatible explicit FreeRADIUS main config user/group directives
+  ansible.builtin.assert:
+    that:
+      - >
+        (
+          radius_main_config_identity_directives.stdout_lines
+          | select('match', '^user=')
+          | map('regex_replace', '^user=', '')
+          | list
+          | first
+          | default(radius_runtime_user)
+        ) == radius_runtime_user
+      - >
+        (
+          radius_main_config_identity_directives.stdout_lines
+          | select('match', '^group=')
+          | map('regex_replace', '^group=', '')
+          | list
+          | first
+          | default(radius_runtime_group)
+        ) == radius_runtime_group
+    fail_msg: >-
+      The supplied FreeRADIUS main config contains explicit user/group directives
+      that do not match the container runtime identity. Update radiusd.conf to use
+      user={{ radius_runtime_user }} and group={{ radius_runtime_group }}, or remove
+      the explicit directives entirely. Numeric IDs such as {{ radius_runtime_uid }}
+      / {{ radius_runtime_gid }} are not accepted here.
+  when:
+    - radius_enabled | bool
+    - radius_main_config_src_path | length > 0
 
 - name: Reject destructive import input in maintenance mode
   ansible.builtin.assert:

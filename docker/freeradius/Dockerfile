@@ -35,6 +35,7 @@ RUN set -eux; \
       ca-certificates \
       freeradius \
       freeradius-ldap \
+      freeradius-utils \
       ldap-utils \
       procps; \
     rm -rf /var/lib/apt/lists/*; \

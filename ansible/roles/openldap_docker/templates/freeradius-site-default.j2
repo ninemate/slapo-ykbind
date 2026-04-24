@@ -13,6 +13,12 @@ server default {
 
   authorize {
     preprocess
+    if (&CHAP-Password || &MS-CHAP-Challenge || &MS-CHAP-Response) {
+      update reply {
+        Reply-Message := "Use PAP for LDAP-backed RADIUS login"
+      }
+      reject
+    }
     chap
     mschap
     digest
@@ -24,7 +30,7 @@ server default {
     expiration
     logintime
     ldap
-    if ((ok || updated) && User-Password) {
+    if ((ok || updated) && &User-Password) {
       update control {
         Auth-Type := LDAP
       }
@@ -59,11 +65,17 @@ server default {
 
   accounting {
     detail
+    ldap
   }
 
   session {
   }
 
   post-auth {
+    ldap
+  }
+
+  Post-Auth-Type REJECT {
+    attr_filter.access_reject
   }
 }

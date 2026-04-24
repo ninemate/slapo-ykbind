@@ -129,12 +129,13 @@ radius_enabled: false
 radius_container_name: freeradius-ldap
 radius_image_name: freeradius-ldap:latest
 radius_config_dir: /opt/openldap-ykbind/radius/config
-radius_listen_auth_port: 1812
-radius_listen_acct_port: 1813
-radius_ldap_server: openldap
+radius_auth_port: 1812
+radius_acct_port: 1813
+radius_ldap_host: openldap
 radius_ldap_bind_dn: cn=admin,dc=example,dc=org
 radius_ldap_bind_password: changeme
 radius_ldap_base_dn: dc=example,dc=org
+radius_clients_base_dn: ou=radius_clients,dc=example,dc=org
 ```
 
 Proxy variables are intentionally empty by default. Set them explicitly if your control node needs them for package installation or Docker builds.
@@ -239,6 +240,7 @@ The RADIUS service:
 
 - listens on `1812/udp` and `1813/udp` by default
 - connects to the LDAP container over the Compose network
+- relays PAP authentication to LDAP bind, so the LDAP side decides whether a given user needs `password` or `password+OTP`
 - can use a full existing FreeRADIUS config tree
 - can also run with a smaller override model where Ansible deploys only selected files such as:
   - `clients.conf`
@@ -253,19 +255,38 @@ Supported config models:
   - that tree is copied to the target host and mounted to `/etc/freeradius/3.0`
 - partial overrides:
   - set one or more of `radius_radiusd_conf`, `radius_clients_conf`, `radius_mods_available_ldap`, `radius_sites_available_default`, `radius_sites_available_inner_tunnel`
-  - or let Ansible render the LDAP module and site configs from variables
+  - or let Ansible render the LDAP module, dynamic client config, and site configs from variables
 
 Default LDAP wiring for the managed RADIUS templates:
 
-- LDAP host: `openldap`
+- LDAP host: `radius_ldap_host`
 - LDAP port: `1389`
 - bind DN: `radius_ldap_bind_dn`
 - bind password: `radius_ldap_bind_password`
 - base DN: `radius_ldap_base_dn`
 - user base DN: `radius_ldap_user_base_dn`
 - user filter: `radius_ldap_user_filter`
+- client base DN: `radius_clients_base_dn`
+
+Managed relay behavior:
+
+- FreeRADIUS does not split `password+OTP`
+- PAP credentials are sent to LDAP bind unchanged
+- users with `ykbind` / YubiKey policy enabled in LDAP must authenticate with `password+OTP`
+- users without that LDAP-side policy authenticate with plain password
+- device reply attributes such as `Juniper-Local-User-Name`, `CP-Gaia-User-Role`, `CP-Gaia-SuperUser-Access`, `MBG-Management-Privilege-Level`, `Symbol-Admin-Role`, and `Class` are mapped from LDAP reply attributes
+
+Managed dynamic client behavior:
+
+- define allowed source networks in `radius_dynamic_client_networks`
+- client records are looked up under `radius_clients_base_dn`
+- the lookup key defaults to `cn=%{Packet-Src-IP-Address}`
+- the shared secret defaults to the LDAP attribute `radiusClientSecret`
+- the RADIUS shortname defaults to `radiusClientIdentifier`
 
 The generated FreeRADIUS templates are intentionally small. They are meant as a practical baseline, not as a replacement for a mature site-specific config tree.
+
+If you migrate a full existing `radiusd.conf`, do not keep numeric or distro-specific runtime identity directives such as `user = 11060`, `group = 11060`, `user = freerad`, or `group = freerad`. Either remove those lines or set them to `user = radius-runtime` and `group = radius-runtime` so they match the container runtime account.
 
 ## Example Runs
 
@@ -312,10 +333,12 @@ Enable the optional RADIUS sidecar with a repo-managed LDAP module and site conf
 cd ansible
 ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e radius_enabled=true \
-  -e radius_clients_conf=radius/clients.conf \
+  -e radius_ldap_host=openldap \
   -e radius_ldap_bind_dn='cn=admin,dc=example,dc=org' \
   -e radius_ldap_bind_password='<set-admin-password>' \
-  -e radius_ldap_base_dn='dc=example,dc=org'
+  -e radius_ldap_base_dn='dc=example,dc=org' \
+  -e radius_clients_base_dn='ou=radius_clients,dc=example,dc=org' \
+  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-205","ipaddr":"192.168.205.0","netmask":24},{"name":"dynamic-101","ipaddr":"192.168.101.0","netmask":24},{"name":"dynamic","ipaddr":"192.168.235.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-4000","ipaddr":"10.0.1.0","netmask":16,"require_message_authenticator":"no"}]}'
 ```
 
 Deploy with a full existing FreeRADIUS config tree:
@@ -420,7 +443,35 @@ docker exec freeradius-ldap ldapwhoami -x \
   -H ldap://openldap:1389
 ```
 
-If you have a known RADIUS client and shared secret configured, test an actual Access-Request with your preferred client tooling such as `radtest` or `radclient` from a trusted host.
+Managed dynamic client config sanity check:
+
+```bash
+docker exec freeradius-ldap grep -n 'dynamic_clients_ref' /etc/freeradius/3.0/clients.conf
+docker exec freeradius-ldap grep -n 'ou=radius_clients,dc=example,dc=org' /etc/freeradius/3.0/clients.conf
+```
+
+Relay auth smoke test from inside the container:
+
+```bash
+docker exec freeradius-ldap radtest '<uid>' '<password-or-password+otp>' 127.0.0.1:1812 0 testing123
+```
+
+LDAP-backed client entries are expected under `ou=radius_clients,<base dn>`. With the managed defaults:
+
+- `cn` is matched against the packet source IP
+- `radiusClientSecret` provides the shared secret
+- `radiusClientIdentifier` becomes the FreeRADIUS shortname / NAS identifier hint
+
+Typical LDAP checks:
+
+```bash
+docker exec openldap-ykbind ldapsearch -x -LLL \
+  -D "cn=admin,dc=example,dc=org" \
+  -w '<set-admin-password>' \
+  -H ldap://127.0.0.1:1389 \
+  -b "ou=radius_clients,dc=example,dc=org" \
+  "(cn=192.168.205.10)" cn radiusClientIdentifier radiusClientSecret
+```
 
 ## YubiKey Overlay Usage
 
