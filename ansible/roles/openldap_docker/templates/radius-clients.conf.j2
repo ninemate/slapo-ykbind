@@ -30,7 +30,7 @@ client {{ client.name }} {
 client {{ network.name }} {
   ipaddr = {{ network.ipaddr }}
   netmask = {{ network.netmask }}
-  dynamic_clients = {{ radius_dynamic_client_server_name }}
+  dynamic_clients = {{ network.dynamic_server_name | default(network.name ~ '_ref') }}
 {% if network.proto is defined %}
   proto = {{ network.proto }}
 {% endif %}
@@ -41,8 +41,8 @@ client {{ network.name }} {
 }
 {% endfor %}
 {% if radius_dynamic_client_networks | length > 0 %}
-
-server {{ radius_dynamic_client_server_name }} {
+{% for network in radius_dynamic_client_networks %}
+server {{ network.dynamic_server_name | default(network.name ~ '_ref') }} {
   authorize {
     dynamic_clients
     if ("%{ldap:{{ radius_dynamic_client_ldap_uri }}/{{ radius_clients_base_dn }}?{{ radius_dynamic_client_secret_lookup_attribute }}?sub?{{ radius_dynamic_client_lookup_attribute }}=%{Packet-Src-IP-Address}}") {
@@ -51,9 +51,13 @@ server {{ radius_dynamic_client_server_name }} {
         FreeRADIUS-Client-Shortname = "%{ldap:{{ radius_dynamic_client_ldap_uri }}/{{ radius_clients_base_dn }}?{{ radius_dynamic_client_shortname_attribute }}?sub?{{ radius_dynamic_client_lookup_attribute }}=%{Packet-Src-IP-Address}}"
         FreeRADIUS-Client-Secret = "%{ldap:{{ radius_dynamic_client_ldap_uri }}/{{ radius_clients_base_dn }}?{{ radius_dynamic_client_secret_lookup_attribute }}?sub?{{ radius_dynamic_client_lookup_attribute }}=%{Packet-Src-IP-Address}}"
         FreeRADIUS-Client-NAS-Type = {{ radius_dynamic_client_nas_type | quote }}
+{% if network.require_message_authenticator is defined %}
+        FreeRADIUS-Client-Require-MA = {{ ((network.require_message_authenticator | bool) | ternary('yes', 'no')) | quote }}
+{% endif %}
       }
     }
     ok
   }
 }
+{% endfor %}
 {% endif %}
