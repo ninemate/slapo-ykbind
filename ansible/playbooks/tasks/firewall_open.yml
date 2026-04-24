@@ -1,0 +1,26 @@
+---
+- name: Set temporary permissive iptables policies during deploy
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -P
+      - "{{ item }}"
+      - ACCEPT
+  loop:
+    - INPUT
+    - FORWARD
+    - OUTPUT
+
+- name: Flush managed INPUT firewall chain if it exists
+  ansible.builtin.shell: |
+    iptables -nL "{{ ldap_firewall_input_chain }}" >/dev/null 2>&1 && iptables -F "{{ ldap_firewall_input_chain }}" || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Flush managed DOCKER-USER firewall chain if it exists
+  ansible.builtin.shell: |
+    iptables -nL "{{ ldap_firewall_docker_user_chain }}" >/dev/null 2>&1 && iptables -F "{{ ldap_firewall_docker_user_chain }}" || true
+  args:
+    executable: /bin/bash
+  changed_when: false

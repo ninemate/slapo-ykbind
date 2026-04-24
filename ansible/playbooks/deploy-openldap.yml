@@ -4,6 +4,13 @@
   become: true
   vars:
     repo_root: "{{ playbook_dir | dirname | dirname }}"
+  pre_tasks:
+    - name: Open firewall policies before deploy
+      ansible.builtin.import_tasks: tasks/firewall_open.yml
+      when: ldap_manage_host_firewall | bool
   roles:
     - openldap_docker
-
+  post_tasks:
+    - name: Lock down firewall policies after deploy
+      ansible.builtin.import_tasks: tasks/firewall_lockdown.yml
+      when: ldap_manage_host_firewall | bool

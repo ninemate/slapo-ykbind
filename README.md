@@ -147,6 +147,13 @@ ldap_peer_ip: ""
 ldap_replication_bind_dn: cn=mirrormode,dc=example,dc=org
 ldap_replication_bind_password: ""
 ldap_replication_use_ldaps: false
+
+ldap_manage_host_firewall: true
+ldap_firewall_ssh_allowed_cidrs:
+  - 10.0.0.0/23
+ldap_firewall_service_allowed_cidrs:
+  - 10.0.0.0/16
+  - 192.168.235.0/24
 ```
 
 Proxy variables are intentionally empty by default. Set them explicitly if your control node needs them for package installation or Docker builds.
@@ -233,6 +240,24 @@ If both nodes have LDAPS configured and certificates matching the guest FQDNs, s
 ldap_enable_ldaps: true
 ldap_replication_use_ldaps: true
 ```
+
+## Optional Host Firewall Management
+
+The deploy playbook can temporarily open the host iptables policies before deployment and then re-apply a restrictive whitelist after the role finishes.
+
+Current managed behavior:
+
+- pre-task sets `INPUT`, `FORWARD`, and `OUTPUT` policy to `ACCEPT`
+- post-task installs a managed whitelist for:
+  - SSH from `ldap_firewall_ssh_allowed_cidrs`
+  - LDAP and optional LDAPS from `ldap_firewall_service_allowed_cidrs`
+  - RADIUS auth/accounting from `ldap_firewall_service_allowed_cidrs`
+- post-task sets final policy to:
+  - `INPUT DROP`
+  - `FORWARD DROP`
+  - `OUTPUT ACCEPT`
+
+The Docker-published service ports are filtered through `DOCKER-USER`, so the service CIDR restrictions also apply to container-published LDAP and RADIUS ports.
 
 ## Host Paths And Ownership
 
