@@ -31,19 +31,6 @@
     ldap_node_ip_effective: >-
       {{ ldap_node_ip if (ldap_node_ip | length > 0)
          else ansible_host | default(ansible_default_ipv4.address | default('')) }}
-    ldap_replication_uri_scheme: "{{ (ldap_replication_use_ldaps | bool) | ternary('ldaps', 'ldap') }}"
-    ldap_replication_uri_port: "{{ (ldap_replication_use_ldaps | bool) | ternary(ldap_ldaps_port, ldap_listen_port) }}"
-    ldap_replication_self_uri_effective: >-
-      {{ ldap_replication_self_uri if (ldap_replication_self_uri | length > 0)
-         else (ldap_replication_uri_scheme ~ '://' ~ ((ldap_node_fqdn if (ldap_node_fqdn | length > 0) else ansible_fqdn | default(inventory_hostname))) ~ ':' ~ (((ldap_replication_use_ldaps | bool) | ternary(ldap_ldaps_port, ldap_listen_port)) | string)) }}
-    ldap_replication_peer_uri_effective: >-
-      {{ ldap_replication_peer_uri if (ldap_replication_peer_uri | length > 0)
-         else (ldap_replication_uri_scheme ~ '://' ~ ((ldap_peer_fqdn if (ldap_peer_fqdn | length > 0) else ldap_peer_ip)) ~ ':' ~ (((ldap_replication_use_ldaps | bool) | ternary(ldap_ldaps_port, ldap_listen_port)) | string)) if ((ldap_peer_fqdn | length > 0) or (ldap_peer_ip | length > 0))
-         else '' }}
-    ldap_replication_rid_effective: >-
-      {{ ldap_replication_rid if (ldap_replication_rid | string | length > 0)
-         else ('%03d' | format((ldap_replication_peer_server_id | int) % 1000)) if (ldap_replication_peer_server_id | string | length > 0)
-         else '' }}
     radius_requires_image_refresh: "{{ (radius_enabled | bool) and (ldap_mode != 'maintenance') }}"
     radius_config_src_path: >-
       {{ radius_config_src_dir if (radius_config_src_dir | length > 0 and radius_config_src_dir.startswith('/'))
@@ -68,6 +55,25 @@
     radius_sites_available_inner_tunnel_src_path: >-
       {{ radius_sites_available_inner_tunnel if (radius_sites_available_inner_tunnel | length > 0 and radius_sites_available_inner_tunnel.startswith('/'))
          else (repo_root ~ '/' ~ radius_sites_available_inner_tunnel) if (radius_sites_available_inner_tunnel | length > 0)
+         else '' }}
+
+- name: Set derived LDAP replication URI facts
+  ansible.builtin.set_fact:
+    ldap_replication_uri_scheme: "{{ (ldap_replication_use_ldaps | bool) | ternary('ldaps', 'ldap') }}"
+    ldap_replication_uri_port: "{{ (ldap_replication_use_ldaps | bool) | ternary(ldap_ldaps_port, ldap_listen_port) }}"
+
+- name: Set derived LDAP replication endpoint facts
+  ansible.builtin.set_fact:
+    ldap_replication_self_uri_effective: >-
+      {{ ldap_replication_self_uri if (ldap_replication_self_uri | length > 0)
+         else (ldap_replication_uri_scheme ~ '://' ~ ldap_node_fqdn_effective ~ ':' ~ (ldap_replication_uri_port | string)) }}
+    ldap_replication_peer_uri_effective: >-
+      {{ ldap_replication_peer_uri if (ldap_replication_peer_uri | length > 0)
+         else (ldap_replication_uri_scheme ~ '://' ~ ((ldap_peer_fqdn if (ldap_peer_fqdn | length > 0) else ldap_peer_ip)) ~ ':' ~ (ldap_replication_uri_port | string)) if ((ldap_peer_fqdn | length > 0) or (ldap_peer_ip | length > 0))
+         else '' }}
+    ldap_replication_rid_effective: >-
+      {{ ldap_replication_rid if (ldap_replication_rid | string | length > 0)
+         else ('%03d' | format((ldap_replication_peer_server_id | int) % 1000)) if (ldap_replication_peer_server_id | string | length > 0)
          else '' }}
 
 - name: Set derived RADIUS main config path fact
