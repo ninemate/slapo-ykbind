@@ -29,6 +29,40 @@
       to this mode.
   when: ldap_adopt_existing_mode | bool
 
+- name: Reject mixed full-tree and individual RADIUS config overrides
+  ansible.builtin.assert:
+    that:
+      - not (
+          (radius_config_src_path | length > 0)
+          and (
+            (radius_radiusd_conf_src_path | length > 0)
+            or (radius_clients_conf_src_path | length > 0)
+            or (radius_mods_available_ldap_src_path | length > 0)
+            or (radius_sites_available_default_src_path | length > 0)
+            or (radius_sites_available_inner_tunnel_src_path | length > 0)
+            or (radius_clients | length > 0)
+          )
+        )
+    fail_msg: >-
+      radius_config_src_dir mounts a complete FreeRADIUS config tree.
+      Do not mix it with per-file RADIUS overrides or templated radius_clients data.
+  when: radius_enabled | bool
+
+- name: Require at least one usable RADIUS config path when RADIUS is enabled
+  ansible.builtin.assert:
+    that:
+      - radius_use_full_config_tree
+        or radius_mount_clients_conf
+        or radius_mount_ldap_module
+        or radius_mount_default_site
+        or radius_mount_inner_tunnel_site
+        or radius_mount_radiusd_conf
+    fail_msg: >-
+      radius_enabled=true, but no FreeRADIUS config source was selected.
+      Provide radius_config_src_dir for a full existing config tree, or use the
+      managed LDAP/site templates and optional clients.conf overrides.
+  when: radius_enabled | bool
+
 - name: Reject destructive import input in maintenance mode
   ansible.builtin.assert:
     that:

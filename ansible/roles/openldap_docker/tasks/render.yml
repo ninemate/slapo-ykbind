@@ -76,6 +76,7 @@
 - name: Store systemd unit change state
   ansible.builtin.set_fact:
     ldap_systemd_unit_changed: "{{ ldap_systemd_unit_template.changed | default(false) }}"
+    radius_config_changed: "{{ radius_config_changed | default(false) }}"
 
 - name: Render LDAP configuration LDIF assets
   ansible.builtin.template:

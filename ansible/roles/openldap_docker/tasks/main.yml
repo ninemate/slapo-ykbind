@@ -9,6 +9,10 @@
   ansible.builtin.import_tasks: local_build.yml
   when: ldap_requires_image_refresh | bool
 
+- name: Build RADIUS image on control node
+  ansible.builtin.import_tasks: radius_local_build.yml
+  when: radius_requires_image_refresh | bool
+
 - name: Install host prerequisites
   ansible.builtin.import_tasks: prerequisites.yml
 
@@ -23,6 +27,10 @@
 
 - name: Render Docker and LDIF assets
   ansible.builtin.import_tasks: render.yml
+
+- name: Render RADIUS assets
+  ansible.builtin.import_tasks: radius_render.yml
+  when: radius_enabled | bool
 
 - name: Build image and start container
   ansible.builtin.import_tasks: build_and_run.yml
@@ -45,3 +53,7 @@
 
 - name: Run smoke tests
   ansible.builtin.import_tasks: verify.yml
+
+- name: Run RADIUS smoke tests
+  ansible.builtin.import_tasks: radius_verify.yml
+  when: radius_enabled | bool

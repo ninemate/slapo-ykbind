@@ -1,0 +1,50 @@
+server inner-tunnel {
+  listen {
+    ipaddr = 127.0.0.1
+    port = 18120
+    type = auth
+  }
+
+  authorize {
+    chap
+    mschap
+    suffix
+    eap {
+      ok = return
+    }
+    files
+    ldap
+    if ((ok || updated) && User-Password) {
+      update control {
+        Auth-Type := LDAP
+      }
+    }
+  }
+
+  authenticate {
+    Auth-Type PAP {
+      pap
+    }
+
+    Auth-Type CHAP {
+      chap
+    }
+
+    Auth-Type MS-CHAP {
+      mschap
+    }
+
+    Auth-Type LDAP {
+      ldap
+    }
+
+    eap
+  }
+
+  session {
+  }
+
+  post-auth {
+    reply_log
+  }
+}

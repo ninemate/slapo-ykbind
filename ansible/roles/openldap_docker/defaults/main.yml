@@ -82,3 +82,54 @@ ldap_tls_key_file: /etc/ldap/tls/tls.key
 ldap_tls_ca_file: /etc/ldap/tls/ca.crt
 
 ldap_smoke_test_user_dn: ""
+
+radius_enabled: false
+radius_container_name: freeradius-ldap
+radius_image_name: freeradius-ldap:latest
+radius_container_base_image: debian:trixie
+radius_runtime_user: radius-runtime
+radius_runtime_group: radius-runtime
+radius_runtime_uid: 11060
+radius_runtime_gid: 11060
+radius_skip_local_build: false
+radius_skip_local_save: false
+radius_deploy_root: "{{ ldap_deploy_root }}/radius"
+radius_local_artifact_root: "{{ ldap_local_artifact_root }}/radius"
+radius_local_build_context_dir: "{{ radius_local_artifact_root }}/context"
+radius_local_image_archive_name: "{{ radius_image_name | regex_replace('[:/]', '_') }}.tar"
+radius_local_image_archive: "{{ radius_local_artifact_root }}/{{ radius_local_image_archive_name }}"
+radius_local_build_log: "{{ radius_local_artifact_root }}/docker-build.log"
+radius_remote_image_archive: "{{ ldap_remote_image_dir }}/{{ radius_local_image_archive_name }}"
+radius_config_dir: "{{ radius_deploy_root }}/config"
+radius_log_dir: "{{ radius_deploy_root }}/logs"
+radius_run_dir: "{{ radius_deploy_root }}/run"
+
+radius_config_src_dir: ""
+radius_radiusd_conf: ""
+radius_clients_conf: ""
+radius_mods_available_ldap: ""
+radius_sites_available_default: ""
+radius_sites_available_inner_tunnel: ""
+radius_clients: []
+
+radius_listen_auth_port: 1812
+radius_listen_acct_port: 1813
+radius_container_auth_port: 1812
+radius_container_acct_port: 1813
+radius_ports: []
+
+radius_ldap_server: openldap
+radius_ldap_port: "{{ ldap_container_ldap_port }}"
+radius_ldap_bind_dn: "{{ ldap_admin_dn }}"
+radius_ldap_bind_password: "{{ ldap_admin_password }}"
+radius_ldap_base_dn: "{{ ldap_base_dn }}"
+radius_ldap_user_base_dn: "{{ ldap_base_dn }}"
+radius_ldap_user_filter: "(uid=%{%{Stripped-User-Name}:-%{User-Name}})"
+radius_ldap_group_base_dn: "{{ ldap_base_dn }}"
+radius_ldap_group_filter: "(objectClass=groupOfNames)"
+radius_ldap_group_membership_attribute: memberOf
+radius_ldap_start_tls: false
+radius_ldap_tls_require_cert: allow
+radius_manage_ldap_module: true
+radius_manage_default_site: true
+radius_manage_inner_tunnel_site: true

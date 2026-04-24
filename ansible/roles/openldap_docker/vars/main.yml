@@ -8,3 +8,7 @@ ldap_container_schema_file: "{{ ldap_container_bootstrap_dir }}/schema/yubikey-o
 ldap_container_tls_dir: /etc/ldap/tls
 ldap_container_internal_ldap_uri: "ldap://127.0.0.1:{{ ldap_container_ldap_port }}"
 ldap_container_internal_ldaps_uri: "ldaps://127.0.0.1:{{ ldap_container_ldaps_port }}"
+radius_container_config_dir: /etc/freeradius/3.0
+radius_container_log_dir: /var/log/freeradius
+radius_container_run_dir: /var/run/freeradius
+radius_container_healthcheck_ldap_uri: "ldap://{{ radius_ldap_server }}:{{ radius_ldap_port }}"

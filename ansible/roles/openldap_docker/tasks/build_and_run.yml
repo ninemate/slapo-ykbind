@@ -15,6 +15,14 @@
   register: ldap_remote_image_archive_copy
   when: ldap_requires_image_refresh | bool
 
+- name: Copy prebuilt RADIUS image archive to target host
+  ansible.builtin.copy:
+    src: "{{ radius_local_image_archive }}"
+    dest: "{{ radius_remote_image_archive }}"
+    mode: "0644"
+  register: radius_remote_image_archive_copy
+  when: radius_requires_image_refresh | bool
+
 - name: Check whether the image already exists on target host
   ansible.builtin.command:
     argv:
@@ -39,6 +47,30 @@
     - ldap_requires_image_refresh | bool
     - ldap_remote_image_archive_copy.changed or ldap_remote_image_inspect.rc != 0
 
+- name: Check whether the RADIUS image already exists on target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ radius_image_name }}"
+  register: radius_remote_image_inspect
+  changed_when: false
+  failed_when: false
+  when: radius_requires_image_refresh | bool
+
+- name: Load prebuilt RADIUS image on target host
+  ansible.builtin.command:
+    argv:
+      - docker
+      - load
+      - -i
+      - "{{ radius_remote_image_archive }}"
+  register: radius_remote_image_load
+  when:
+    - radius_requires_image_refresh | bool
+    - radius_remote_image_archive_copy.changed or radius_remote_image_inspect.rc != 0
+
 - name: Check whether the managed systemd service is already active
   ansible.builtin.command:
     argv:
@@ -57,6 +89,8 @@
         (ldap_compose_manifest_changed | default(false))
         or (ldap_systemd_unit_changed | default(false))
         or (ldap_remote_image_load.changed | default(false))
+        or (radius_remote_image_load.changed | default(false))
+        or (radius_config_changed | default(false))
         or (
           (ldap_maintenance_mode | bool)
           and (

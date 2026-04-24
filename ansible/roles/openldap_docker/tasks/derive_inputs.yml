@@ -25,6 +25,40 @@
          else (repo_root ~ '/' ~ ldap_ldif_import_file) if (ldap_ldif_import_file | length > 0)
          else '' }}
     ldap_effective_init_mode: "{{ (ldap_mode == 'full_import') | ternary('config-only', 'disabled') }}"
+    radius_requires_image_refresh: "{{ (radius_enabled | bool) and (ldap_mode != 'maintenance') }}"
+    radius_config_src_path: >-
+      {{ radius_config_src_dir if (radius_config_src_dir | length > 0 and radius_config_src_dir.startswith('/'))
+         else (repo_root ~ '/' ~ radius_config_src_dir) if (radius_config_src_dir | length > 0)
+         else '' }}
+    radius_radiusd_conf_src_path: >-
+      {{ radius_radiusd_conf if (radius_radiusd_conf | length > 0 and radius_radiusd_conf.startswith('/'))
+         else (repo_root ~ '/' ~ radius_radiusd_conf) if (radius_radiusd_conf | length > 0)
+         else '' }}
+    radius_clients_conf_src_path: >-
+      {{ radius_clients_conf if (radius_clients_conf | length > 0 and radius_clients_conf.startswith('/'))
+         else (repo_root ~ '/' ~ radius_clients_conf) if (radius_clients_conf | length > 0)
+         else '' }}
+    radius_mods_available_ldap_src_path: >-
+      {{ radius_mods_available_ldap if (radius_mods_available_ldap | length > 0 and radius_mods_available_ldap.startswith('/'))
+         else (repo_root ~ '/' ~ radius_mods_available_ldap) if (radius_mods_available_ldap | length > 0)
+         else '' }}
+    radius_sites_available_default_src_path: >-
+      {{ radius_sites_available_default if (radius_sites_available_default | length > 0 and radius_sites_available_default.startswith('/'))
+         else (repo_root ~ '/' ~ radius_sites_available_default) if (radius_sites_available_default | length > 0)
+         else '' }}
+    radius_sites_available_inner_tunnel_src_path: >-
+      {{ radius_sites_available_inner_tunnel if (radius_sites_available_inner_tunnel | length > 0 and radius_sites_available_inner_tunnel.startswith('/'))
+         else (repo_root ~ '/' ~ radius_sites_available_inner_tunnel) if (radius_sites_available_inner_tunnel | length > 0)
+         else '' }}
+
+- name: Set RADIUS config model facts
+  ansible.builtin.set_fact:
+    radius_use_full_config_tree: "{{ (radius_enabled | bool) and (radius_config_src_path | length > 0) }}"
+    radius_mount_radiusd_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and (radius_radiusd_conf_src_path | length > 0) }}"
+    radius_mount_clients_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_clients_conf_src_path | length > 0) or (radius_clients | length > 0)) }}"
+    radius_mount_ldap_module: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_mods_available_ldap_src_path | length > 0) or (radius_manage_ldap_module | bool)) }}"
+    radius_mount_default_site: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_sites_available_default_src_path | length > 0) or (radius_manage_default_site | bool)) }}"
+    radius_mount_inner_tunnel_site: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_sites_available_inner_tunnel_src_path | length > 0) or (radius_manage_inner_tunnel_site | bool)) }}"
 
 - name: Require a full-tree LDIF for full_import mode
   ansible.builtin.assert:
@@ -67,3 +101,11 @@
   when:
     - ldap_full_import_requested | bool
     - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
+
+- name: Show RADIUS deploy model
+  ansible.builtin.debug:
+    msg:
+      - "radius enabled={{ radius_enabled | bool }}"
+      - "radius full config tree={{ radius_use_full_config_tree | bool }}"
+      - "radius image refresh required={{ radius_requires_image_refresh | bool }}"
+  when: radius_enabled | bool

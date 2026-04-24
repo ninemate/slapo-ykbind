@@ -1,0 +1,69 @@
+server default {
+  listen {
+    type = auth
+    ipaddr = *
+    port = {{ radius_container_auth_port }}
+  }
+
+  listen {
+    type = acct
+    ipaddr = *
+    port = {{ radius_container_acct_port }}
+  }
+
+  authorize {
+    preprocess
+    chap
+    mschap
+    digest
+    suffix
+    eap {
+      ok = return
+    }
+    files
+    expiration
+    logintime
+    ldap
+    if ((ok || updated) && User-Password) {
+      update control {
+        Auth-Type := LDAP
+      }
+    }
+  }
+
+  authenticate {
+    Auth-Type PAP {
+      pap
+    }
+
+    Auth-Type CHAP {
+      chap
+    }
+
+    Auth-Type MS-CHAP {
+      mschap
+    }
+
+    Auth-Type LDAP {
+      ldap
+    }
+
+    digest
+    eap
+  }
+
+  preacct {
+    preprocess
+    suffix
+  }
+
+  accounting {
+    detail
+  }
+
+  session {
+  }
+
+  post-auth {
+  }
+}

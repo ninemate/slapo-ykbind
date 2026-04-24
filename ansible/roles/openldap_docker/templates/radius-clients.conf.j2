@@ -1,0 +1,20 @@
+client localhost {
+  ipaddr = 127.0.0.1
+  secret = testing123
+}
+{% for client in radius_clients %}
+
+client {{ client.name }} {
+  ipaddr = {{ client.ipaddr }}
+  secret = {{ client.secret | quote }}
+{% if client.shortname is defined %}
+  shortname = {{ client.shortname }}
+{% endif %}
+{% if client.nastype is defined %}
+  nastype = {{ client.nastype }}
+{% endif %}
+{% if client.require_message_authenticator is defined %}
+  require_message_authenticator = {{ client.require_message_authenticator }}
+{% endif %}
+}
+{% endfor %}

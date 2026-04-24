@@ -9,6 +9,13 @@
     - "{{ ldap_runtime_dir }}"
     - "{{ ldap_remote_image_dir }}"
 
+- name: Create root-owned RADIUS deploy directories on target host
+  ansible.builtin.file:
+    path: "{{ radius_deploy_root }}"
+    state: directory
+    mode: "0755"
+  when: radius_enabled | bool
+
 - name: Create LDAP runtime asset directories on target host
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -34,6 +41,28 @@
     - path: "{{ ldap_log_dir }}"
       mode: "0750"
 
+- name: Create RADIUS runtime directories on target host
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ radius_config_dir }}"
+      mode: "0755"
+    - path: "{{ radius_config_dir }}/mods-available"
+      mode: "0755"
+    - path: "{{ radius_config_dir }}/mods-enabled"
+      mode: "0755"
+    - path: "{{ radius_config_dir }}/sites-enabled"
+      mode: "0755"
+    - path: "{{ radius_log_dir }}"
+      mode: "0750"
+    - path: "{{ radius_run_dir }}"
+      mode: "0750"
+  when: radius_enabled | bool
+
 - name: Align ownership recursively on LDAP bind-mount and runtime directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -50,3 +79,16 @@
     - "{{ ldap_data_dir }}"
     - "{{ ldap_config_dir }}"
     - "{{ ldap_log_dir }}"
+
+- name: Align ownership recursively on RADIUS bind-mount and runtime directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    recurse: true
+  loop:
+    - "{{ radius_config_dir }}"
+    - "{{ radius_log_dir }}"
+    - "{{ radius_run_dir }}"
+  when: radius_enabled | bool

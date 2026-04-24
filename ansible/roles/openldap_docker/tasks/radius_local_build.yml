@@ -1,0 +1,140 @@
+---
+- name: Create local RADIUS image build directories on control node
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ radius_local_artifact_root }}"
+    - "{{ radius_local_build_context_dir }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Copy RADIUS Docker build assets to control node
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - src: "{{ repo_root }}/docker/freeradius/Dockerfile"
+      dest: "{{ radius_local_build_context_dir }}/Dockerfile"
+    - src: "{{ repo_root }}/docker/freeradius/entrypoint.sh"
+      dest: "{{ radius_local_build_context_dir }}/entrypoint.sh"
+      mode: "0755"
+    - src: "{{ repo_root }}/docker/freeradius/healthcheck.sh"
+      dest: "{{ radius_local_build_context_dir }}/healthcheck.sh"
+      mode: "0755"
+    - src: "{{ role_path }}/files/noCheckValidUntil"
+      dest: "{{ radius_local_build_context_dir }}/noCheckValidUntil"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Check whether the local RADIUS image already exists on control node
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - inspect
+      - "{{ radius_image_name }}"
+  register: radius_local_existing_image_check
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Fail when local RADIUS build is skipped but image is missing
+  ansible.builtin.fail:
+    msg: "radius_skip_local_build=true, but the local image does not exist: {{ radius_image_name }}"
+  when:
+    - radius_skip_local_build | bool
+    - radius_local_existing_image_check.rc != 0
+  run_once: true
+
+- name: Remove previous local RADIUS docker build log
+  ansible.builtin.file:
+    path: "{{ radius_local_build_log }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: not (radius_skip_local_build | bool)
+
+- name: Build FreeRADIUS image on control node
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker build --progress=plain \
+      --network "{{ ldap_docker_build_network }}" \
+      -t "{{ radius_image_name }}" \
+      --build-arg "BASE_IMAGE={{ radius_container_base_image }}" \
+      --build-arg "RADIUS_RUNTIME_USER={{ radius_runtime_user }}" \
+      --build-arg "RADIUS_RUNTIME_GROUP={{ radius_runtime_group }}" \
+      --build-arg "RADIUS_RUNTIME_UID={{ radius_runtime_uid }}" \
+      --build-arg "RADIUS_RUNTIME_GID={{ radius_runtime_gid }}" \
+      --build-arg "http_proxy={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}" \
+      --build-arg "https_proxy={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}" \
+      --build-arg "no_proxy={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}" \
+      --build-arg "HTTP_PROXY={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}" \
+      --build-arg "HTTPS_PROXY={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}" \
+      --build-arg "NO_PROXY={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}" \
+      "{{ radius_local_build_context_dir }}" 2>&1 | tee "{{ radius_local_build_log }}"
+  args:
+    executable: /bin/bash
+  register: radius_local_docker_build
+  changed_when: true
+  environment:
+    http_proxy: "{{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
+    https_proxy: "{{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
+    no_proxy: "{{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
+    HTTP_PROXY: "{{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}"
+    HTTPS_PROXY: "{{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}"
+    NO_PROXY: "{{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}"
+    DOCKER_BUILDKIT: "1"
+    BUILDKIT_PROGRESS: plain
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: not (radius_skip_local_build | bool)
+
+- name: Fail when local RADIUS save is skipped but archive is missing
+  ansible.builtin.stat:
+    path: "{{ radius_local_image_archive }}"
+  register: radius_local_archive_stat
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: radius_skip_local_save | bool
+
+- name: Fail when local RADIUS save is skipped but archive does not exist
+  ansible.builtin.fail:
+    msg: "radius_skip_local_save=true, but the local archive does not exist: {{ radius_local_image_archive }}"
+  when:
+    - radius_skip_local_save | bool
+    - not (radius_local_archive_stat.stat.exists | default(false))
+  run_once: true
+
+- name: Remove previous local RADIUS image archive
+  ansible.builtin.file:
+    path: "{{ radius_local_image_archive }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: not (radius_skip_local_save | bool)
+
+- name: Export RADIUS image tarball on control node
+  ansible.builtin.command:
+    argv:
+      - docker
+      - save
+      - -o
+      - "{{ radius_local_image_archive }}"
+      - "{{ radius_image_name }}"
+  register: radius_local_docker_save
+  changed_when: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: not (radius_skip_local_save | bool)

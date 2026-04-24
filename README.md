@@ -5,7 +5,7 @@
 This repository contains two deliverables:
 
 1. a custom `ykbind` OpenLDAP overlay module for YubiKey OTP validation
-2. an Ansible-based Docker deployment stack for OpenLDAP on Debian-based hosts
+2. an Ansible-based Docker deployment stack for OpenLDAP and an optional FreeRADIUS sidecar on Debian-based hosts
 
 The deployment supports three explicit modes:
 
@@ -19,6 +19,8 @@ The OpenLDAP runtime inside the container is non-root. The image creates a dedic
 
 - [ansible/](ansible): playbooks, inventory, role defaults, templates, and files
 - [docker/openldap/](docker/openldap): Docker image build files and entrypoint logic
+- [docker/freeradius/](docker/freeradius): FreeRADIUS image build files and runtime checks
+- [radius/](radius): place existing FreeRADIUS config trees or file overrides here; see [radius/README.md](radius/README.md)
 - [schema/](schema): bundled schema sources and LDIF files
 - [exports/](exports): place exported LDIF files here before migration; see [exports/README.md](exports/README.md)
 - [tls/](tls): place TLS material here before LDAPS deployment; see [tls/README.md](tls/README.md)
@@ -36,6 +38,7 @@ Running [ansible/playbooks/deploy-openldap.yml](ansible/playbooks/deploy-openlda
 - prepares target directories for `data`, `config`, `logs`, `runtime`, and `runtime/tls`
 - aligns host-side ownership with the dedicated runtime UID/GID
 - renders a Docker Compose file and a systemd unit for the managed stack
+- optionally builds and deploys a separate FreeRADIUS container wired to the LDAP service
 - enables and starts the systemd service so the container also comes back after reboot
 - starts the container with root-only bootstrap steps, then runs `slapd` as the dedicated non-root runtime user
 - performs mode-specific initialization, adoption, or maintenance actions
@@ -121,6 +124,17 @@ ldap_no_proxy: localhost,127.0.0.1
 ldap_deploy_mode: full_import
 ldap_maintenance_restart_container: false
 ldap_manage_host_packages: true
+
+radius_enabled: false
+radius_container_name: freeradius-ldap
+radius_image_name: freeradius-ldap:latest
+radius_config_dir: /opt/openldap-ykbind/radius/config
+radius_listen_auth_port: 1812
+radius_listen_acct_port: 1813
+radius_ldap_server: openldap
+radius_ldap_bind_dn: cn=admin,dc=example,dc=org
+radius_ldap_bind_password: changeme
+radius_ldap_base_dn: dc=example,dc=org
 ```
 
 Proxy variables are intentionally empty by default. Set them explicitly if your control node needs them for package installation or Docker builds.
@@ -217,6 +231,42 @@ systemctl start openldap-ykbind-compose
 journalctl -u openldap-ykbind-compose -f
 ```
 
+## Optional RADIUS Container
+
+Set `radius_enabled=true` to deploy a separate FreeRADIUS container in the same Compose stack.
+
+The RADIUS service:
+
+- listens on `1812/udp` and `1813/udp` by default
+- connects to the LDAP container over the Compose network
+- can use a full existing FreeRADIUS config tree
+- can also run with a smaller override model where Ansible deploys only selected files such as:
+  - `clients.conf`
+  - `mods-available/ldap`
+  - `sites-enabled/default`
+  - `sites-enabled/inner-tunnel`
+
+Supported config models:
+
+- full tree:
+  - set `radius_config_src_dir` to a directory containing an existing FreeRADIUS config tree
+  - that tree is copied to the target host and mounted to `/etc/freeradius/3.0`
+- partial overrides:
+  - set one or more of `radius_radiusd_conf`, `radius_clients_conf`, `radius_mods_available_ldap`, `radius_sites_available_default`, `radius_sites_available_inner_tunnel`
+  - or let Ansible render the LDAP module and site configs from variables
+
+Default LDAP wiring for the managed RADIUS templates:
+
+- LDAP host: `openldap`
+- LDAP port: `1389`
+- bind DN: `radius_ldap_bind_dn`
+- bind password: `radius_ldap_bind_password`
+- base DN: `radius_ldap_base_dn`
+- user base DN: `radius_ldap_user_base_dn`
+- user filter: `radius_ldap_user_filter`
+
+The generated FreeRADIUS templates are intentionally small. They are meant as a practical baseline, not as a replacement for a mature site-specific config tree.
+
 ## Example Runs
 
 Fresh import:
@@ -254,6 +304,27 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e ldap_tls_private_key_src=tls/tls.key \
   -e ldap_tls_ca_src=tls/ca.crt \
   -e ldap_maintenance_restart_container=true
+```
+
+Enable the optional RADIUS sidecar with a repo-managed LDAP module and site config:
+
+```bash
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e radius_enabled=true \
+  -e radius_clients_conf=radius/clients.conf \
+  -e radius_ldap_bind_dn='cn=admin,dc=example,dc=org' \
+  -e radius_ldap_bind_password='<set-admin-password>' \
+  -e radius_ldap_base_dn='dc=example,dc=org'
+```
+
+Deploy with a full existing FreeRADIUS config tree:
+
+```bash
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e radius_enabled=true \
+  -e radius_config_src_dir=radius/full-config
 ```
 
 Skip local rebuild when the control node image already exists:
@@ -331,6 +402,25 @@ The image now creates these paths explicitly:
 - `/var/log/slapd`
 
 At container start, the entrypoint verifies and re-prepares the writable runtime paths before dropping privileges to the dedicated `ldap-runtime` account.
+
+The optional FreeRADIUS image also runs non-root. It uses a dedicated `radius-runtime` user with default UID/GID `11060:11060`, and Ansible prepares the host-side `radius/config`, `radius/logs`, and `radius/run` directories accordingly.
+
+The Debian `freeradius` package installs its default config tree under `/etc/freeradius/3.0`, but that tree is normally owned by the package's own `freerad` account with group-only read permissions. The image build now normalizes that packaged config tree so the dedicated `radius-runtime` account can read the baseline files and partial override mounts without falling back to the distro-specific service user. The same normalization is applied to the package-provided snakeoil key path under `/etc/ssl/private` so the packaged EAP module can still pass `freeradius -CX` under the non-root runtime.
+
+## RADIUS Testing
+
+After deploy, useful checks are:
+
+```bash
+systemctl status openldap-ykbind-compose
+docker exec freeradius-ldap freeradius -CX -d /etc/freeradius/3.0
+docker exec freeradius-ldap ldapwhoami -x \
+  -D "cn=admin,dc=example,dc=org" \
+  -w '<set-admin-password>' \
+  -H ldap://openldap:1389
+```
+
+If you have a known RADIUS client and shared secret configured, test an actual Access-Request with your preferred client tooling such as `radtest` or `radclient` from a trusted host.
 
 ## YubiKey Overlay Usage
 

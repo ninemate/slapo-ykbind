@@ -58,3 +58,58 @@ services:
 {% if ldap_enable_ldaps %}
       - "{{ ldap_tls_host_dir }}:{{ ldap_container_tls_dir }}:ro"
 {% endif %}
+{% if radius_enabled %}
+
+  radius:
+    container_name: {{ radius_container_name }}
+    image: {{ radius_image_name }}
+    depends_on:
+      - openldap
+    labels:
+      com.yubik.radius.managed: "true"
+      com.yubik.radius.deploy-root: {{ radius_deploy_root | quote }}
+      com.yubik.radius.runtime-uid: {{ (radius_runtime_uid | string) | quote }}
+      com.yubik.radius.runtime-gid: {{ (radius_runtime_gid | string) | quote }}
+    environment:
+      RADIUS_CONFIG_DIR: {{ radius_container_config_dir | quote }}
+      RADIUS_LOG_DIR: {{ radius_container_log_dir | quote }}
+      RADIUS_RUN_DIR: {{ radius_container_run_dir | quote }}
+      RADIUS_LDAP_HEALTHCHECK_URI: {{ radius_container_healthcheck_ldap_uri | quote }}
+      RADIUS_LDAP_BIND_DN: {{ radius_ldap_bind_dn | quote }}
+      RADIUS_LDAP_BIND_PASSWORD: {{ radius_ldap_bind_password | quote }}
+    hostname: {{ radius_container_name }}
+    restart: unless-stopped
+    user: "{{ radius_runtime_uid }}:{{ radius_runtime_gid }}"
+    ports:
+{% if radius_ports | length > 0 %}
+{%   for port_mapping in radius_ports %}
+      - {{ port_mapping | quote }}
+{%   endfor %}
+{% else %}
+      - "{{ radius_listen_auth_port }}:{{ radius_container_auth_port }}/udp"
+      - "{{ radius_listen_acct_port }}:{{ radius_container_acct_port }}/udp"
+{% endif %}
+    volumes:
+{% if radius_use_full_config_tree %}
+      - "{{ radius_config_dir }}:{{ radius_container_config_dir }}:ro"
+{% else %}
+{%   if radius_mount_radiusd_conf %}
+      - "{{ radius_config_dir }}/radiusd.conf:{{ radius_container_config_dir }}/radiusd.conf:ro"
+{%   endif %}
+{%   if radius_mount_clients_conf %}
+      - "{{ radius_config_dir }}/clients.conf:{{ radius_container_config_dir }}/clients.conf:ro"
+{%   endif %}
+{%   if radius_mount_ldap_module %}
+      - "{{ radius_config_dir }}/mods-available/ldap:{{ radius_container_config_dir }}/mods-available/ldap:ro"
+      - "{{ radius_config_dir }}/mods-available/ldap:{{ radius_container_config_dir }}/mods-enabled/ldap:ro"
+{%   endif %}
+{%   if radius_mount_default_site %}
+      - "{{ radius_config_dir }}/sites-enabled/default:{{ radius_container_config_dir }}/sites-enabled/default:ro"
+{%   endif %}
+{%   if radius_mount_inner_tunnel_site %}
+      - "{{ radius_config_dir }}/sites-enabled/inner-tunnel:{{ radius_container_config_dir }}/sites-enabled/inner-tunnel:ro"
+{%   endif %}
+{% endif %}
+      - "{{ radius_log_dir }}:{{ radius_container_log_dir }}"
+      - "{{ radius_run_dir }}:{{ radius_container_run_dir }}"
+{% endif %}
