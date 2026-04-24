@@ -4,7 +4,7 @@ changetype: modify
 replace: olcTLSCACertificateFile
 olcTLSCACertificateFile: {{ ldap_tls_ca_file }}
 -
-{% else %}
+{% elif 'olcTLSCACertificateFile:' in (ldap_tls_config_check.stdout | default('')) %}
 delete: olcTLSCACertificateFile
 -
 {% endif %}
