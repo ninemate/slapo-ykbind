@@ -48,5 +48,5 @@ ansible-playbook playbooks/deploy-openldap.yml \
   -e radius_ldap_bind_password='<set-admin-password>' \
   -e radius_ldap_base_dn='dc=example,dc=org' \
   -e radius_clients_base_dn='ou=radius_clients,dc=example,dc=org' \
-  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-205","ipaddr":"192.168.205.0","netmask":24},{"name":"dynamic-101","ipaddr":"192.168.101.0","netmask":24},{"name":"dynamic","ipaddr":"192.168.235.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-4000","ipaddr":"10.0.1.0","netmask":16,"require_message_authenticator":"no"}]}'
+  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-a","ipaddr":"192.0.2.0","netmask":24},{"name":"dynamic-b","ipaddr":"198.51.100.0","netmask":24},{"name":"dynamic-ma","ipaddr":"203.0.113.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-wide","ipaddr":"198.18.0.0","netmask":15,"require_message_authenticator":"no"}]}'
 ```

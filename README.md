@@ -148,12 +148,9 @@ ldap_replication_bind_dn: cn=mirrormode,dc=example,dc=org
 ldap_replication_bind_password: ""
 ldap_replication_use_ldaps: false
 
-ldap_manage_host_firewall: true
-ldap_firewall_ssh_allowed_cidrs:
-  - 10.0.0.0/23
-ldap_firewall_service_allowed_cidrs:
-  - 10.0.0.0/16
-  - 192.168.235.0/24
+ldap_manage_host_firewall: false
+ldap_firewall_ssh_allowed_cidrs: []
+ldap_firewall_service_allowed_cidrs: []
 ```
 
 Proxy variables are intentionally empty by default. Set them explicitly if your control node needs them for package installation or Docker builds.
@@ -210,10 +207,10 @@ Typical vars for node 1:
 ldap_mirrormode_enabled: true
 ldap_server_id: 101
 ldap_replication_peer_server_id: 102
-ldap_node_fqdn: t-v-nua.gironet.test.giro.hu
-ldap_node_ip: 10.0.1.221
-ldap_peer_fqdn: t-m-nua.gironet.test.giro.hu
-ldap_peer_ip: 10.0.1.222
+ldap_node_fqdn: ldap-node-1.example.net
+ldap_node_ip: 192.0.2.10
+ldap_peer_fqdn: ldap-node-2.example.net
+ldap_peer_ip: 192.0.2.11
 ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
 ldap_replication_bind_password: "<mirror-password>"
 ldap_replication_use_ldaps: false
@@ -225,10 +222,10 @@ Typical vars for node 2:
 ldap_mirrormode_enabled: true
 ldap_server_id: 102
 ldap_replication_peer_server_id: 101
-ldap_node_fqdn: t-m-nua.gironet.test.giro.hu
-ldap_node_ip: 10.0.1.222
-ldap_peer_fqdn: t-v-nua.gironet.test.giro.hu
-ldap_peer_ip: 10.0.1.221
+ldap_node_fqdn: ldap-node-2.example.net
+ldap_node_ip: 192.0.2.11
+ldap_peer_fqdn: ldap-node-1.example.net
+ldap_peer_ip: 192.0.2.10
 ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
 ldap_replication_bind_password: "<mirror-password>"
 ldap_replication_use_ldaps: false
@@ -244,6 +241,17 @@ ldap_replication_use_ldaps: true
 ## Optional Host Firewall Management
 
 The deploy playbook can temporarily open the host iptables policies before deployment and then re-apply a restrictive whitelist after the role finishes.
+
+The firewall logic is disabled by default. Enable it only with explicit CIDR lists in your vars file, for example:
+
+```yaml
+ldap_manage_host_firewall: true
+ldap_firewall_ssh_allowed_cidrs:
+  - 198.51.100.0/24
+ldap_firewall_service_allowed_cidrs:
+  - 192.0.2.0/24
+  - 203.0.113.0/24
+```
 
 Current managed behavior:
 
@@ -430,7 +438,7 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e radius_ldap_bind_password='<set-admin-password>' \
   -e radius_ldap_base_dn='dc=example,dc=org' \
   -e radius_clients_base_dn='ou=radius_clients,dc=example,dc=org' \
-  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-205","ipaddr":"192.168.205.0","netmask":24},{"name":"dynamic-101","ipaddr":"192.168.101.0","netmask":24},{"name":"dynamic","ipaddr":"192.168.235.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-4000","ipaddr":"10.0.1.0","netmask":16,"require_message_authenticator":"no"}]}'
+  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-a","ipaddr":"192.0.2.0","netmask":24},{"name":"dynamic-b","ipaddr":"198.51.100.0","netmask":24},{"name":"dynamic-ma","ipaddr":"203.0.113.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-wide","ipaddr":"198.18.0.0","netmask":15,"require_message_authenticator":"no"}]}'
 ```
 
 Deploy with a full existing FreeRADIUS config tree:
@@ -562,7 +570,7 @@ docker exec openldap-ykbind ldapsearch -x -LLL \
   -w '<set-admin-password>' \
   -H ldap://127.0.0.1:1389 \
   -b "ou=radius_clients,dc=example,dc=org" \
-  "(cn=192.168.205.10)" cn radiusClientIdentifier radiusClientSecret
+  "(cn=192.0.2.10)" cn radiusClientIdentifier radiusClientSecret
 ```
 
 ## YubiKey Overlay Usage

@@ -107,15 +107,13 @@ ldap_replication_manage_limits: true
 ldap_replication_syncprov_checkpoint_ops: 100
 ldap_replication_syncprov_checkpoint_minutes: 10
 ldap_replication_syncprov_sessionlog: 100
-ldap_manage_host_firewall: true
+ldap_replication_module_name: syncprov.la
+ldap_manage_host_firewall: false
 ldap_firewall_input_chain: YUBIK-HOST-INPUT
 ldap_firewall_docker_user_chain: YUBIK-DOCKER-USER
 ldap_firewall_ssh_port: 22
-ldap_firewall_ssh_allowed_cidrs:
-  - 10.0.0.0/23
-ldap_firewall_service_allowed_cidrs:
-  - 10.0.0.0/16
-  - 192.168.235.0/24
+ldap_firewall_ssh_allowed_cidrs: []
+ldap_firewall_service_allowed_cidrs: []
 
 radius_enabled: false
 radius_container_name: freeradius-ldap

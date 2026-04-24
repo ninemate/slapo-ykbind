@@ -47,6 +47,28 @@
   register: ldap_replication_global_state
   changed_when: false
 
+- name: Read current module list state for replication prerequisites
+  ansible.builtin.shell: >
+    docker exec {{ ldap_container_name }} sh -lc
+    "ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config '(objectClass=olcModuleList)'
+    dn olcModulePath olcModuleLoad |
+    awk '
+      BEGIN { first=1 }
+      /^dn: / {
+        if (first) {
+          sub(/^dn: /, \"\", \$0); print \"dn=\" \$0; first=0
+        }
+      }
+      /^olcModulePath: / {
+        sub(/^olcModulePath: /, \"\", \$0); print \"path=\" \$0
+      }
+      /^olcModuleLoad: / {
+        sub(/^olcModuleLoad: /, \"\", \$0); print \"load=\" \$0
+      }
+    '"
+  register: ldap_replication_module_state
+  changed_when: false
+
 - name: Read current database replication config
   ansible.builtin.command:
     argv:
@@ -100,6 +122,10 @@
 
 - name: Store current replication state facts
   ansible.builtin.set_fact:
+    ldap_replication_module_config_dn: "{{ (ldap_replication_module_state.stdout_lines | select('match', '^dn=') | list | first | default('dn=cn=module{0},cn=config')) | regex_replace('^dn=', '') }}"
+    ldap_replication_module_config_exists: "{{ (ldap_replication_module_state.stdout_lines | select('match', '^dn=') | list | length) > 0 }}"
+    ldap_replication_module_path_present: "{{ (ldap_replication_module_state.stdout_lines | select('match', '^path=') | list | length) > 0 }}"
+    ldap_replication_module_loaded: "{{ ldap_replication_module_name in ((ldap_replication_module_state.stdout_lines | select('match', '^load=') | map('regex_replace', '^load=', '') | list) | join('\n')) }}"
     ldap_replication_current_server_ids: "{{ ldap_replication_global_state.stdout_lines | select('match', '^olcServerID: ') | map('regex_replace', '^olcServerID: ', '') | list }}"
     ldap_replication_current_syncrepl_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcSyncRepl: ') | map('regex_replace', '^olcSyncRepl: ', '') | list }}"
     ldap_replication_current_multiprovider_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcMultiProvider: ') | map('regex_replace', '^olcMultiProvider: ', '') | list }}"
@@ -153,6 +179,40 @@
       }}
     ldap_replication_access_rule_present: "{{ ldap_replication_access_rule_matches | length > 0 }}"
     ldap_replication_limits_rule_present: "{{ ldap_replication_limits_rule_matches | length > 0 }}"
+
+- name: Render syncprov module load LDIF
+  ansible.builtin.template:
+    src: module-load.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-module-load.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  vars:
+    ldap_module_config_dn: "{{ ldap_replication_module_config_dn }}"
+    ldap_module_config_exists: "{{ ldap_replication_module_config_exists }}"
+    ldap_module_path_present: "{{ ldap_replication_module_path_present }}"
+    ldap_module_name_to_load: "{{ ldap_replication_module_name }}"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - not (ldap_replication_module_loaded | bool)
+
+- name: Load syncprov module in cn=config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-module-load.ldif"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - not (ldap_replication_module_loaded | bool)
 
 - name: Render global replication LDIF
   ansible.builtin.template:

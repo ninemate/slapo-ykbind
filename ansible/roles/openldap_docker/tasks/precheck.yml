@@ -139,6 +139,16 @@
       If ldap_replication_use_ldaps=true, ldap_enable_ldaps must also be true on the node.
   when: ldap_mirrormode_enabled | bool
 
+- name: Validate required firewall whitelist inputs
+  ansible.builtin.assert:
+    that:
+      - ldap_firewall_ssh_allowed_cidrs | length > 0
+      - ldap_firewall_service_allowed_cidrs | length > 0
+    fail_msg: >-
+      ldap_manage_host_firewall=true requires explicit non-empty ldap_firewall_ssh_allowed_cidrs
+      and ldap_firewall_service_allowed_cidrs values. The defaults are intentionally empty.
+  when: ldap_manage_host_firewall | bool
+
 - name: Require existing cn=config directory for adopt_existing mode
   ansible.builtin.assert:
     that:
