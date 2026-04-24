@@ -34,36 +34,50 @@
       - load
       - -i
       - "{{ ldap_remote_image_archive }}"
+  register: ldap_remote_image_load
   when:
     - ldap_requires_image_refresh | bool
     - ldap_remote_image_archive_copy.changed or ldap_remote_image_inspect.rc != 0
 
-- name: Start OpenLDAP container from prebuilt image
+- name: Check whether the managed systemd service is already active
   ansible.builtin.command:
     argv:
-      - docker-compose
-      - -f
-      - "{{ ldap_compose_file }}"
-      - up
-      - -d
-      - --remove-orphans
-    chdir: "{{ ldap_deploy_root }}"
-  register: ldap_compose_up
-  changed_when: "'is up to date' not in (ldap_compose_up.stdout ~ ldap_compose_up.stderr)"
+      - systemctl
+      - is-active
+      - --quiet
+      - "{{ ldap_systemd_service_name }}"
+  register: ldap_systemd_service_active_check
+  changed_when: false
+  failed_when: false
 
-- name: Restart maintained LDAP container when runtime files changed in place
-  ansible.builtin.command:
-    argv:
-      - docker-compose
-      - -f
-      - "{{ ldap_compose_file }}"
-      - restart
-      - openldap
-    chdir: "{{ ldap_deploy_root }}"
-  when:
-    - ldap_maintenance_mode | bool
-    - (ldap_maintenance_restart_container | bool) or (ldap_tls_material_changed | default(false) | bool)
-    - not (ldap_compose_up.changed | bool)
+- name: Determine whether the managed systemd service needs a restart
+  ansible.builtin.set_fact:
+    ldap_systemd_service_restart_required: >-
+      {{
+        (ldap_compose_manifest_changed | default(false))
+        or (ldap_systemd_unit_changed | default(false))
+        or (ldap_remote_image_load.changed | default(false))
+        or (
+          (ldap_maintenance_mode | bool)
+          and (
+            (ldap_maintenance_restart_container | bool)
+            or (ldap_tls_material_changed | default(false) | bool)
+          )
+        )
+      }}
+
+- name: Enable and reconcile the managed systemd service
+  ansible.builtin.systemd_service:
+    name: "{{ ldap_systemd_service_name }}"
+    enabled: true
+    daemon_reload: "{{ ldap_systemd_unit_changed | default(false) }}"
+    state: >-
+      {{
+        'restarted'
+        if ((ldap_systemd_service_restart_required | bool) and (ldap_systemd_service_active_check.rc == 0))
+        else 'started'
+      }}
+  register: ldap_systemd_service_apply
 
 - name: Wait for LDAP TCP listener on target host
   ansible.builtin.wait_for:

@@ -27,6 +27,8 @@ ldap_tls_host_dir: "{{ ldap_runtime_dir }}/tls"
 ldap_remote_image_dir: "{{ ldap_deploy_root }}/images"
 ldap_remote_image_archive: "{{ ldap_remote_image_dir }}/{{ ldap_local_image_archive_name }}"
 ldap_compose_file: "{{ ldap_deploy_root }}/docker-compose.yml"
+ldap_systemd_service_name: "{{ ldap_container_name }}-compose"
+ldap_systemd_unit_file: "/etc/systemd/system/{{ ldap_systemd_service_name }}.service"
 
 ldap_data_dir: "{{ ldap_deploy_root }}/data"
 ldap_config_dir: "{{ ldap_deploy_root }}/config"

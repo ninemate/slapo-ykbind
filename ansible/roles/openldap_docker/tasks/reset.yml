@@ -1,4 +1,18 @@
 ---
+- name: Check whether the managed systemd unit file exists before full_import reset
+  ansible.builtin.stat:
+    path: "{{ ldap_systemd_unit_file }}"
+  register: ldap_systemd_unit_file_stat
+  when: ldap_full_import_requested | bool
+
+- name: Stop managed systemd service before full_import reset
+  ansible.builtin.systemd_service:
+    name: "{{ ldap_systemd_service_name }}"
+    state: stopped
+  when:
+    - ldap_full_import_requested | bool
+    - ldap_systemd_unit_file_stat.stat.exists | default(false)
+
 - name: Stop OpenLDAP container before full_import reset
   ansible.builtin.command:
     argv:

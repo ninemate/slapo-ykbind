@@ -60,6 +60,22 @@
     src: docker-compose.yml.j2
     dest: "{{ ldap_compose_file }}"
     mode: "0644"
+  register: ldap_compose_manifest_template
+
+- name: Store Docker Compose manifest change state
+  ansible.builtin.set_fact:
+    ldap_compose_manifest_changed: "{{ ldap_compose_manifest_template.changed | default(false) }}"
+
+- name: Render systemd unit for Docker Compose stack
+  ansible.builtin.template:
+    src: openldap-compose.service.j2
+    dest: "{{ ldap_systemd_unit_file }}"
+    mode: "0644"
+  register: ldap_systemd_unit_template
+
+- name: Store systemd unit change state
+  ansible.builtin.set_fact:
+    ldap_systemd_unit_changed: "{{ ldap_systemd_unit_template.changed | default(false) }}"
 
 - name: Render LDAP configuration LDIF assets
   ansible.builtin.template:

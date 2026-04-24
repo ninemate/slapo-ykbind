@@ -17,17 +17,17 @@ Egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et
 
 ## Mit csinál a playbook
 
-Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansible/playbooks/deploy-openldap.yml) futtatása:
+Az [ansible/playbooks/deploy-openldap.yml](ansible/playbooks/deploy-openldap.yml) futtatása:
 
 - a control node-on létrehozza a Docker build contextet
-- Debian 13 alapú image-et buildel a [docker/openldap/Dockerfile](/home/username/Documents/yubik/docker/openldap/Dockerfile) alapján
+- Debian 13 alapú image-et buildel a [docker/openldap/Dockerfile](docker/openldap/Dockerfile) alapján
 - a meglévő `slapo-ykbind.c` modult multi-stage buildben lefordítja
 - a kész image-et `docker save`-val exportálja
 - átmásolja az image tarballt a cél hostra és `docker load`-dal betölti
 - létrehozza a target hoston a deploy könyvtárakat
 - a bind mountolt `data/`, `config/`, `logs/`, `runtime/` és `runtime/tls/` ownershipjét a dedikált runtime uid/gid értékre állítja
-- elindítja a konténert Docker Compose-szal
-- inicializálja a slapd konfigurációt és a választott init módot az [docker/openldap/entrypoint.sh](/home/username/Documents/yubik/docker/openldap/entrypoint.sh) segítségével
+- kirenderel egy systemd unitot a Docker Compose stackhez, majd enable-öli és elindítja azt
+- inicializálja a slapd konfigurációt és a választott init módot az [docker/openldap/entrypoint.sh](docker/openldap/entrypoint.sh) segítségével
 - a konténeren belül rootként csak az előkészítő bootstrap és jogosultság-javítás fut, a `slapd` folyamat maga dedikált non-root userrel indul
 - `full_import` módban szándékosan újra létrehozza a perzisztens `data/` és `config/` könyvtárakat
 - `full_import` módban minimális, szűz `cn=config`-et bootstrapol
@@ -44,13 +44,13 @@ A `main` branch volt a stabilabb alap: innen maradt meg a normál Ansible build/
 
 ## Repository felépítés
 
-- [ansible/](/home/username/Documents/yubik/ansible): inventory, playbook, role, defaults, vars, templates, files
-- [docker/openldap/](/home/username/Documents/yubik/docker/openldap): a konténerhez használt `Dockerfile` és `entrypoint.sh`
-- [schema/](/home/username/Documents/yubik/schema): a saját schema LDIF és schema forrás
-- [examples/](/home/username/Documents/yubik/examples): kézi LDAP példák és korábbi LDIF minták
-- [tools/filter-unsupported-ldif.sh](/home/username/Documents/yubik/tools/filter-unsupported-ldif.sh): import előtti LDIF szűrő, alapból az `ou=dns` ág kidobásához
-- [slapo-ykbind.c](/home/username/Documents/yubik/slapo-ykbind.c): a saját overlay forrása
-- [Makefile](/home/username/Documents/yubik/Makefile): a modul build logikája
+- [ansible/](ansible): inventory, playbook, role, defaults, vars, templates, files
+- [docker/openldap/](docker/openldap): a konténerhez használt `Dockerfile` és `entrypoint.sh`
+- [schema/](schema): a saját schema LDIF és schema forrás
+- [examples/](examples): kézi LDAP példák és korábbi LDIF minták
+- [tools/filter-unsupported-ldif.sh](tools/filter-unsupported-ldif.sh): import előtti LDIF szűrő, alapból az `ou=dns` ág kidobásához
+- [slapo-ykbind.c](slapo-ykbind.c): a saját overlay forrása
+- [Makefile](Makefile): a modul build logikája
 
 ## Előfeltételek
 
@@ -100,13 +100,13 @@ ansible_become=true
 
 Az alap inventory itt van:
 
-- [ansible/inventory/hosts.ini](/home/username/Documents/yubik/ansible/inventory/hosts.ini)
+- [ansible/inventory/hosts.ini](ansible/inventory/hosts.ini)
 
 ## Fontos változók
 
 Az alapértelmezések itt vannak:
 
-- [ansible/roles/openldap_docker/defaults/main.yml](/home/username/Documents/yubik/ansible/roles/openldap_docker/defaults/main.yml)
+- [ansible/roles/openldap_docker/defaults/main.yml](ansible/roles/openldap_docker/defaults/main.yml)
 
 Legalább ezeket érdemes átnézni:
 
@@ -161,6 +161,8 @@ További fontos, deploy közben gyakran használt változók:
 - `ldap_skip_local_build`
 - `ldap_skip_local_save`
 - `ldap_deploy_mode`
+- `ldap_systemd_service_name`
+- `ldap_systemd_unit_file`
 - `ldap_runtime_user`
 - `ldap_runtime_group`
 - `ldap_runtime_uid`
@@ -279,6 +281,46 @@ Ownership szabályok:
 - a role a hoston rekurzívan igazítja a `data/`, `config/`, `logs/`, `runtime/ldif/`, `runtime/schema/`, `runtime/ldif/imports/`, `runtime/ldif/config-imports/` és `runtime/tls/` ownershipjét
 - a TLS private key alapból `0600`, a cert és CA `0644`, mindhárom a runtime uid/gid tulajdonában
 - a konténer belül a `slapd` magas belső portokon figyel: `1389` és opcionálisan `1636`; a host oldali publikált port marad `389` és `636`
+
+## Systemd service management
+
+A host oldalon a Docker Compose stacket nem közvetlenül ad-hoc `docker-compose up` parancs kezeli, hanem egy Ansible által kirenderelt és engedélyezett systemd unit:
+
+- unit név: alapból `openldap-ykbind-compose.service`
+- unit path: alapból `/etc/systemd/system/openldap-ykbind-compose.service`
+- boot után automatikusan indul
+- a playbook `enable` és `start` állapotba teszi
+
+A unit `docker-compose up -d --remove-orphans` paranccsal indít, `docker-compose stop` paranccsal állít meg, és `systemctl restart` esetén újraalkalmazza a compose state-et.
+
+Beépített hardening, a compose kliens működésével kompatibilisen:
+
+- `NoNewPrivileges=yes`
+- `PrivateTmp=yes`
+- `PrivateDevices=yes`
+- `ProtectSystem=full`
+- `ProtectHome=yes`
+- `ProtectKernelTunables=yes`
+- `ProtectKernelModules=yes`
+- `ProtectControlGroups=yes`
+- `ProtectClock=yes`
+- `ProtectHostname=yes`
+- `RestrictSUIDSGID=yes`
+- `LockPersonality=yes`
+- `MemoryDenyWriteExecute=yes`
+- `RestrictRealtime=yes`
+- `SystemCallArchitectures=native`
+- `ReadWritePaths=/opt/openldap-ykbind`
+
+Tipikus host oldali parancsok:
+
+```bash
+systemctl status openldap-ykbind-compose
+systemctl restart openldap-ykbind-compose
+systemctl stop openldap-ykbind-compose
+systemctl start openldap-ykbind-compose
+journalctl -u openldap-ykbind-compose -f
+```
 
 Lokális control node build artifactok alapértelmezett helye:
 
@@ -537,7 +579,7 @@ Fő pontok:
 - `apt-get source openldap`
 - a szükséges build dependency-ket explicit Debian csomaglistából telepíti
 - a builder stage OpenLDAP forrásból futtatott `configure`, `make depend` és `make -C include` lépéssel állítja elő a modulhoz szükséges `portable.h`, `ldap_features.h` és `ldap_config.h` headereket
-- a repositoryban lévő [Makefile](/home/username/Documents/yubik/Makefile) fut
+- a repositoryban lévő [Makefile](Makefile) fut
 - a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
 - a runtime image saját `ldap-runtime` user/group accountot hoz létre, és a `slapd` `gosu` segítségével erre a dedikált uid/gid-re vált induláskor
 - a kész image a control node-on tarballként exportálódik
@@ -575,6 +617,23 @@ A deploy során a role:
 - `adopt_existing` módban nem futtat destruktív vagy módosító init/import műveleteket a meglévő `cn=config` ellen
 - `maintenance` módban idempotens schema/module/overlay/TLS config ellenőrzést és szükség esetén update-et futtat, de nem írja felül az adatfát
 
+## Build és path-előkészítés
+
+Az image build nem támaszkodik vakon a Debian `slapd` csomag implicit könyvtár-létrehozására. A `slapd slapd/no_configuration boolean true` beállítás mellett a csomag nem garantálja a `cn=config` state könyvtár létrejöttét, ezért a build explicit előkészíti a runtime pathokat.
+
+A gyakorlatban ez azt jelenti, hogy a build most tudatosan létrehozza ezeket a könyvtárakat, a dedikált non-root LDAP runtime uid/gid ownershipjével:
+
+- `/opt/openldap/bootstrap`
+- `/opt/openldap/bootstrap/ldif`
+- `/opt/openldap/bootstrap/schema`
+- `/etc/ldap/tls`
+- `/etc/ldap/slapd.d`
+- `/run/slapd`
+- `/var/lib/ldap`
+- `/var/log/slapd`
+
+Runtime oldalon az entrypoint ugyanezek közül a writable pathokat újra ellenőrzi és szükség esetén újra létrehozza vagy visszaigazítja a dedikált uid/gid ownershipre. Erre azért van szükség, mert bind mounttal vagy korábbi state-ből induló deploynál a host oldali állapot eltérhet az image-ben bake-elt alapállapottól.
+
 A schema import nem fix `cn={N}` indexre támaszkodik. A role minden schema import előtt kiolvassa a teljes `cn=schema,cn=config` tartalmat, majd a betöltendő LDIF-et schema entrynként hasonlítja össze a meglévő állapottal. Egy teljes forrásoldali `cn=schema,cn=config` dump is megadható: a már meglévő beépített schema entryk kimaradnak, és csak a teljesen hiányzó custom schema entryk kerülnek egy szűrt import LDIF-be. Ha egy hiányzó nevű entry OID-jai részben már léteznek más schema alatt, a playbook hibával megáll, mert az `ldapadd` ilyen esetben `duplicate attributeType` hibával bukna.
 
 Az entrypoint init módjai:
@@ -604,6 +663,8 @@ Az Ansible smoke tesztek automatikusan lefutnak, de manuálisan ezek a leghaszno
 Konténer állapot:
 
 ```bash
+systemctl status openldap-ykbind-compose
+
 docker-compose -f /opt/openldap-ykbind/docker-compose.yml ps
 ```
 
@@ -805,16 +866,16 @@ ldapmodify -x -D "cn=admin,dc=example,dc=org" -W \
 
 Javasolt ACL-lel védeni a secret mezőket. Van hozzá példa itt:
 
-- [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif)
+- [examples/acl-yubikey-secrets.ldif](examples/acl-yubikey-secrets.ldif)
 
 ## Kézi LDAP példák
 
 Megmaradt kézi referenciafájlok:
 
-- [examples/module-load.ldif](/home/username/Documents/yubik/examples/module-load.ldif)
-- [examples/module-path-and-load.ldif](/home/username/Documents/yubik/examples/module-path-and-load.ldif)
-- [examples/overlay-config.ldif](/home/username/Documents/yubik/examples/overlay-config.ldif)
-- [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif)
+- [examples/module-load.ldif](examples/module-load.ldif)
+- [examples/module-path-and-load.ldif](examples/module-path-and-load.ldif)
+- [examples/overlay-config.ldif](examples/overlay-config.ldif)
+- [examples/acl-yubikey-secrets.ldif](examples/acl-yubikey-secrets.ldif)
 
 Ezek főleg debughoz és kézi finomhangoláshoz hasznosak; a normál deploy út az Ansible playbook.
 

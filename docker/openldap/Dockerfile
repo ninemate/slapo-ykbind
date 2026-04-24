@@ -103,8 +103,18 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid "${LDAP_RUNTIME_GID}" "${LDAP_RUNTIME_GROUP}"; \
     useradd --uid "${LDAP_RUNTIME_UID}" --gid "${LDAP_RUNTIME_GID}" --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home "${LDAP_RUNTIME_USER}"; \
-    mkdir -p /opt/openldap/bootstrap /etc/ldap/tls /run/slapd /var/log/slapd; \
-    chown -R "${LDAP_RUNTIME_UID}:${LDAP_RUNTIME_GID}" /opt/openldap/bootstrap /etc/ldap/tls /run/slapd /var/log/slapd /var/lib/ldap /etc/ldap/slapd.d; \
+    # Debian's slapd package skips creating cn=config state when no_configuration=true,
+    # so runtime paths must be created explicitly instead of assuming package side effects.
+    install -d -m 0755 -o "${LDAP_RUNTIME_UID}" -g "${LDAP_RUNTIME_GID}" \
+      /opt/openldap/bootstrap \
+      /opt/openldap/bootstrap/ldif \
+      /opt/openldap/bootstrap/schema; \
+    install -d -m 0750 -o "${LDAP_RUNTIME_UID}" -g "${LDAP_RUNTIME_GID}" \
+      /etc/ldap/tls \
+      /etc/ldap/slapd.d \
+      /run/slapd \
+      /var/lib/ldap \
+      /var/log/slapd; \
     chmod +x /entrypoint.sh /healthcheck.sh
 
 COPY syslog-ng.conf /etc/syslog-ng/syslog-ng.conf

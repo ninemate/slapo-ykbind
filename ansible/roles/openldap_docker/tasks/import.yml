@@ -69,11 +69,9 @@
     - "'dn: ' in (ldap_full_restore_base_precheck.stdout | default(''))"
 
 - name: Stop OpenLDAP container before offline full tree restore
-  ansible.builtin.command:
-    argv:
-      - docker
-      - stop
-      - "{{ ldap_container_name }}"
+  ansible.builtin.systemd_service:
+    name: "{{ ldap_systemd_service_name }}"
+    state: stopped
 
 - name: Import full tree LDIF with offline slapadd
   ansible.builtin.command:
@@ -111,14 +109,9 @@
       - /var/log/slapd
 
 - name: Start OpenLDAP container after full tree restore
-  ansible.builtin.command:
-    argv:
-      - docker-compose
-      - -f
-      - "{{ ldap_compose_file }}"
-      - up
-      - -d
-    chdir: "{{ ldap_deploy_root }}"
+  ansible.builtin.systemd_service:
+    name: "{{ ldap_systemd_service_name }}"
+    state: started
 
 - name: Wait for LDAP TCP listener after full restore
   ansible.builtin.wait_for:

@@ -1,0 +1,39 @@
+[Unit]
+Description=OpenLDAP Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists={{ ldap_compose_file }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ ldap_deploy_root }}
+Environment=COMPOSE_PROJECT_NAME={{ ldap_container_name }}
+ExecStart=/usr/bin/docker-compose -f {{ ldap_compose_file }} up -d --remove-orphans
+ExecStop=/usr/bin/docker-compose -f {{ ldap_compose_file }} stop
+ExecReload=/usr/bin/docker-compose -f {{ ldap_compose_file }} up -d --remove-orphans
+TimeoutStartSec=0
+TimeoutStopSec=120
+StandardOutput=journal
+StandardError=journal
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+ReadWritePaths={{ ldap_deploy_root }}
+
+[Install]
+WantedBy=multi-user.target
