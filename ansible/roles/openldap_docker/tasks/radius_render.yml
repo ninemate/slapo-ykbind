@@ -10,6 +10,45 @@
   register: radius_full_config_copy
   when: radius_use_full_config_tree | bool
 
+- name: Build list of managed host-side RADIUS file mount paths
+  ansible.builtin.set_fact:
+    radius_managed_file_mount_paths: >-
+      {{
+        [
+          radius_config_dir ~ '/radiusd.conf',
+          radius_config_dir ~ '/clients.conf',
+          radius_config_dir ~ '/mods-available/ldap',
+          radius_config_dir ~ '/mods-enabled/ldap',
+          radius_config_dir ~ '/sites-enabled/default',
+          radius_config_dir ~ '/sites-enabled/inner-tunnel'
+        ]
+        + (
+          [
+            radius_dynamic_clients_module_host_path,
+            radius_config_dir ~ '/mods-enabled/dynamic_clients'
+          ]
+          if (radius_dynamic_client_networks | length > 0)
+          else []
+        )
+      }}
+  when: not (radius_use_full_config_tree | bool)
+
+- name: Inspect managed host-side RADIUS file mount paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ radius_managed_file_mount_paths }}"
+  register: radius_managed_file_mount_path_stats
+  when: not (radius_use_full_config_tree | bool)
+
+- name: Remove stale managed RADIUS mount directories on target host
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ radius_managed_file_mount_path_stats.results | default([]) }}"
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - item.stat.isdir | default(false)
+
 - name: Inspect host radiusd.conf path state
   ansible.builtin.stat:
     path: "{{ radius_config_dir }}/radiusd.conf"
