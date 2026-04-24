@@ -1,0 +1,15 @@
+dn: {{ ldap_database_config_dn }}
+changetype: modify
+{% if ldap_replication_current_syncrepl_values | length > 0 %}
+replace: olcSyncRepl
+{% else %}
+add: olcSyncRepl
+{% endif %}
+olcSyncRepl: {{ ldap_replication_syncrepl_value }}
+-
+{% if ldap_replication_current_multiprovider_values | length > 0 %}
+replace: olcMultiProvider
+{% else %}
+add: olcMultiProvider
+{% endif %}
+olcMultiProvider: TRUE

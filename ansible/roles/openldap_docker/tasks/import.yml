@@ -73,23 +73,35 @@
     name: "{{ ldap_systemd_service_name }}"
     state: stopped
 
+- name: Build offline slapadd command line
+  ansible.builtin.set_fact:
+    ldap_offline_slapadd_argv: >-
+      {{
+        [
+          'docker',
+          'run',
+          '--rm',
+          '--volumes-from',
+          ldap_container_name,
+          '--entrypoint',
+          'slapadd',
+          ldap_image_name,
+          '-F',
+          '/etc/ldap/slapd.d',
+          '-n',
+          '1',
+          '-w'
+        ]
+        + ((ldap_mirrormode_enabled | bool) | ternary(['-S', ldap_server_id | string], []))
+        + [
+          '-l',
+          ldap_container_bootstrap_dir ~ '/ldif/imports/full-tree.ldif'
+        ]
+      }}
+
 - name: Import full tree LDIF with offline slapadd
   ansible.builtin.command:
-    argv:
-      - docker
-      - run
-      - --rm
-      - --volumes-from
-      - "{{ ldap_container_name }}"
-      - --entrypoint
-      - slapadd
-      - "{{ ldap_image_name }}"
-      - -F
-      - /etc/ldap/slapd.d
-      - -n
-      - "1"
-      - -l
-      - "{{ ldap_container_bootstrap_dir }}/ldif/imports/full-tree.ldif"
+    argv: "{{ ldap_offline_slapadd_argv }}"
 
 - name: Fix LDAP DB ownership after offline slapadd
   ansible.builtin.command:

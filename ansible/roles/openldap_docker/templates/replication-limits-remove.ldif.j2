@@ -1,0 +1,9 @@
+dn: {{ ldap_database_config_dn }}
+changetype: modify
+{% for rule in ldap_replication_limits_rule_matches %}
+delete: olcLimits
+olcLimits: {{ rule }}
+{% if not loop.last %}
+-
+{% endif %}
+{% endfor %}

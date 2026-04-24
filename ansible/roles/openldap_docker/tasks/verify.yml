@@ -105,3 +105,65 @@
   when:
     - ldap_full_import_requested | bool
     - ldap_smoke_test_user_dn | length > 0
+
+- name: Smoke test mirrormode global config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - cn=config
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcServerID
+  register: ldap_mirrormode_global_check
+  changed_when: false
+  when: ldap_mirrormode_enabled | bool
+
+- name: Smoke test mirrormode database config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - "{{ ldap_database_config_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcSyncRepl
+      - olcMultiProvider
+  register: ldap_mirrormode_db_check
+  changed_when: false
+  when: ldap_mirrormode_enabled | bool
+
+- name: Assert mirrormode config is present
+  ansible.builtin.assert:
+    that:
+      - "'olcServerID: ' ~ ldap_server_id ~ ' ' ~ ldap_replication_self_uri_effective in (ldap_mirrormode_global_check.stdout | default(''))"
+      - "'olcMultiProvider: TRUE' in (ldap_mirrormode_db_check.stdout | default(''))"
+      - "'provider=' ~ ldap_replication_peer_uri_effective in (ldap_mirrormode_db_check.stdout | default(''))"
+    fail_msg: >-
+      Mirrormode configuration did not render correctly into cn=config.
+      Inspect olcServerID and olcSyncRepl under {{ ldap_database_config_dn }}.
+  when: ldap_mirrormode_enabled | bool

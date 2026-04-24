@@ -1,0 +1,389 @@
+---
+- name: Discover live cn=config state before replication reconciliation
+  ansible.builtin.import_tasks: discover.yml
+
+- name: Build desired replication config facts
+  ansible.builtin.set_fact:
+    ldap_replication_server_id_value: "{{ ldap_server_id | string }} {{ ldap_replication_self_uri_effective }}"
+    ldap_replication_syncrepl_value: >-
+      rid={{ ldap_replication_rid_effective }}
+      provider={{ ldap_replication_peer_uri_effective }}
+      bindmethod=simple
+      binddn="{{ ldap_replication_bind_dn }}"
+      credentials="{{ ldap_replication_bind_password | replace('\\', '\\\\') | replace('\"', '\\\"') }}"
+      searchbase="{{ ldap_replication_searchbase }}"
+      attrs="{{ ldap_replication_attrs }}"
+      schemachecking={{ ldap_replication_schemachecking }}
+      type={{ ldap_replication_type }}
+      retry="{{ ldap_replication_retry }}"
+      timeout={{ ldap_replication_timeout }}
+      {%- if ldap_replication_use_ldaps | bool %}
+      tls_reqcert={{ ldap_replication_tls_reqcert }}
+      {%- endif %}
+    ldap_replication_access_rule_pattern: 'by dn\.exact="{{ ldap_replication_bind_dn | regex_escape }}" read by \* break$'
+    ldap_replication_limits_rule_pattern: '^dn\.exact="{{ ldap_replication_bind_dn | regex_escape }}" time\.soft=unlimited time\.hard=unlimited size\.soft=unlimited size\.hard=unlimited$'
+
+- name: Read current global replication config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - cn=config
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcServerID
+  register: ldap_replication_global_state
+  changed_when: false
+
+- name: Read current database replication config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - "{{ ldap_database_config_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcSyncRepl
+      - olcMultiProvider
+      - olcAccess
+      - olcLimits
+  register: ldap_replication_db_state
+  changed_when: false
+
+- name: Read current syncprov overlay state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - "{{ ldap_database_config_dn }}"
+      - "(olcOverlay=syncprov)"
+      - dn
+      - olcSpCheckpoint
+      - olcSpSessionlog
+  register: ldap_replication_syncprov_state
+  changed_when: false
+
+- name: Store current replication state facts
+  ansible.builtin.set_fact:
+    ldap_replication_current_server_ids: "{{ ldap_replication_global_state.stdout_lines | select('match', '^olcServerID: ') | map('regex_replace', '^olcServerID: ', '') | list }}"
+    ldap_replication_current_syncrepl_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcSyncRepl: ') | map('regex_replace', '^olcSyncRepl: ', '') | list }}"
+    ldap_replication_current_multiprovider_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcMultiProvider: ') | map('regex_replace', '^olcMultiProvider: ', '') | list }}"
+    ldap_replication_current_access_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | list }}"
+    ldap_replication_current_limits_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | list }}"
+    ldap_replication_syncprov_dn: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^dn: ') | map('regex_replace', '^dn: ', '') | list | first | default('') }}"
+    ldap_replication_syncprov_checkpoint_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpCheckpoint: ') | map('regex_replace', '^olcSpCheckpoint: ', '') | list }}"
+    ldap_replication_syncprov_sessionlog_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpSessionlog: ') | map('regex_replace', '^olcSpSessionlog: ', '') | list }}"
+    ldap_replication_access_rule_matches: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | select('search', ldap_replication_access_rule_pattern) | list }}"
+    ldap_replication_limits_rule_matches: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | select('match', ldap_replication_limits_rule_pattern) | list }}"
+
+- name: Store replication reconciliation decisions
+  ansible.builtin.set_fact:
+    ldap_replication_server_id_needs_reconcile: >-
+      {{
+        (
+          (ldap_mirrormode_enabled | bool)
+          and (ldap_replication_current_server_ids != [ldap_replication_server_id_value])
+        )
+        or (
+          not (ldap_mirrormode_enabled | bool)
+          and (ldap_replication_current_server_ids | length > 0)
+        )
+      }}
+    ldap_replication_syncrepl_needs_reconcile: >-
+      {{
+        (
+          (ldap_mirrormode_enabled | bool)
+          and (
+            (ldap_replication_current_syncrepl_values != [ldap_replication_syncrepl_value])
+            or ((ldap_replication_current_multiprovider_values | map('lower') | list) != ['true'])
+          )
+        )
+        or (
+          not (ldap_mirrormode_enabled | bool)
+          and (
+            (ldap_replication_current_syncrepl_values | length > 0)
+            or (ldap_replication_current_multiprovider_values | length > 0)
+          )
+        )
+      }}
+    ldap_replication_syncprov_exists: "{{ ldap_replication_syncprov_dn | length > 0 }}"
+    ldap_replication_syncprov_needs_reconcile: >-
+      {{
+        (ldap_mirrormode_enabled | bool)
+        and (
+          not (ldap_replication_syncprov_dn | length > 0)
+          or (ldap_replication_syncprov_checkpoint_values != [(ldap_replication_syncprov_checkpoint_ops | string) ~ ' ' ~ (ldap_replication_syncprov_checkpoint_minutes | string)])
+          or (ldap_replication_syncprov_sessionlog_values != [ldap_replication_syncprov_sessionlog | string])
+        )
+      }}
+    ldap_replication_access_rule_present: "{{ ldap_replication_access_rule_matches | length > 0 }}"
+    ldap_replication_limits_rule_present: "{{ ldap_replication_limits_rule_matches | length > 0 }}"
+
+- name: Render global replication LDIF
+  ansible.builtin.template:
+    src: replication-global-config.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-global-config.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when: ldap_replication_server_id_needs_reconcile | bool
+
+- name: Reconcile global olcServerID
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-global-config.ldif"
+  when: ldap_replication_server_id_needs_reconcile | bool
+
+- name: Render syncprov overlay add LDIF
+  ansible.builtin.template:
+    src: replication-syncprov-add.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-syncprov-add.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - not (ldap_replication_syncprov_exists | bool)
+
+- name: Add syncprov overlay to the main database
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-syncprov-add.ldif"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - not (ldap_replication_syncprov_exists | bool)
+
+- name: Render syncprov overlay update LDIF
+  ansible.builtin.template:
+    src: replication-syncprov-update.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-syncprov-update.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_replication_syncprov_exists | bool
+    - ldap_replication_syncprov_needs_reconcile | bool
+
+- name: Update syncprov overlay on the main database
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-syncprov-update.ldif"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_replication_syncprov_exists | bool
+    - ldap_replication_syncprov_needs_reconcile | bool
+
+- name: Render database replication LDIF
+  ansible.builtin.template:
+    src: "{{ (ldap_mirrormode_enabled | bool) | ternary('replication-db-enable.ldif.j2', 'replication-db-disable.ldif.j2') }}"
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-db-config.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when: ldap_replication_syncrepl_needs_reconcile | bool
+
+- name: Reconcile main database syncrepl settings
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-db-config.ldif"
+  when: ldap_replication_syncrepl_needs_reconcile | bool
+
+- name: Render replication access add LDIF
+  ansible.builtin.template:
+    src: replication-access-add.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-access-add.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_replication_manage_acl | bool
+    - not (ldap_replication_access_rule_present | bool)
+
+- name: Add replication access rule
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-access-add.ldif"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_replication_manage_acl | bool
+    - not (ldap_replication_access_rule_present | bool)
+
+- name: Render replication access remove LDIF
+  ansible.builtin.template:
+    src: replication-access-remove.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-access-remove.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when:
+    - not (ldap_mirrormode_enabled | bool)
+    - ldap_replication_manage_acl | bool
+    - ldap_replication_access_rule_present | bool
+
+- name: Remove managed replication access rule
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-access-remove.ldif"
+  when:
+    - not (ldap_mirrormode_enabled | bool)
+    - ldap_replication_manage_acl | bool
+    - ldap_replication_access_rule_present | bool
+
+- name: Render replication limits add LDIF
+  ansible.builtin.template:
+    src: replication-limits-add.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-limits-add.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_replication_manage_limits | bool
+    - not (ldap_replication_limits_rule_present | bool)
+
+- name: Add replication limits rule
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-limits-add.ldif"
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_replication_manage_limits | bool
+    - not (ldap_replication_limits_rule_present | bool)
+
+- name: Render replication limits remove LDIF
+  ansible.builtin.template:
+    src: replication-limits-remove.ldif.j2
+    dest: "{{ ldap_runtime_ldif_dir }}/replication-limits-remove.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  when:
+    - not (ldap_mirrormode_enabled | bool)
+    - ldap_replication_manage_limits | bool
+    - ldap_replication_limits_rule_present | bool
+
+- name: Remove managed replication limits rule
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapmodify
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/ldif/replication-limits-remove.ldif"
+  when:
+    - not (ldap_mirrormode_enabled | bool)
+    - ldap_replication_manage_limits | bool
+    - ldap_replication_limits_rule_present | bool

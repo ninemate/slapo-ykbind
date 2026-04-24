@@ -1,0 +1,4 @@
+dn: {{ ldap_database_config_dn }}
+changetype: modify
+add: olcLimits
+olcLimits: dn.exact="{{ ldap_replication_bind_dn }}" time.soft=unlimited time.hard=unlimited size.soft=unlimited size.hard=unlimited

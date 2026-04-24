@@ -51,6 +51,9 @@
   ansible.builtin.import_tasks: import.yml
   when: ldap_full_import_requested | bool
 
+- name: Reconcile LDAP mirrormode replication
+  ansible.builtin.import_tasks: replication_configure.yml
+
 - name: Run smoke tests
   ansible.builtin.import_tasks: verify.yml
 

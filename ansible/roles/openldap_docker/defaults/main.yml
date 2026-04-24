@@ -82,6 +82,31 @@ ldap_tls_key_file: /etc/ldap/tls/tls.key
 ldap_tls_ca_file: /etc/ldap/tls/ca.crt
 
 ldap_smoke_test_user_dn: ""
+ldap_mirrormode_enabled: false
+ldap_server_id: ""
+ldap_replication_peer_server_id: ""
+ldap_node_fqdn: ""
+ldap_node_ip: ""
+ldap_peer_fqdn: ""
+ldap_peer_ip: ""
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: ""
+ldap_replication_searchbase: "{{ ldap_base_dn }}"
+ldap_replication_use_ldaps: false
+ldap_replication_self_uri: ""
+ldap_replication_peer_uri: ""
+ldap_replication_rid: ""
+ldap_replication_type: refreshAndPersist
+ldap_replication_attrs: "*,+"
+ldap_replication_retry: "60 +"
+ldap_replication_timeout: 1
+ldap_replication_schemachecking: "on"
+ldap_replication_tls_reqcert: demand
+ldap_replication_manage_acl: true
+ldap_replication_manage_limits: true
+ldap_replication_syncprov_checkpoint_ops: 100
+ldap_replication_syncprov_checkpoint_minutes: 10
+ldap_replication_syncprov_sessionlog: 100
 
 radius_enabled: false
 radius_container_name: freeradius-ldap

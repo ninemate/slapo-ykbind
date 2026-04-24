@@ -136,6 +136,17 @@ radius_ldap_bind_dn: cn=admin,dc=example,dc=org
 radius_ldap_bind_password: changeme
 radius_ldap_base_dn: dc=example,dc=org
 radius_clients_base_dn: ou=radius_clients,dc=example,dc=org
+
+ldap_mirrormode_enabled: false
+ldap_server_id: ""
+ldap_replication_peer_server_id: ""
+ldap_node_fqdn: ""
+ldap_node_ip: ""
+ldap_peer_fqdn: ""
+ldap_peer_ip: ""
+ldap_replication_bind_dn: cn=mirrormode,dc=example,dc=org
+ldap_replication_bind_password: ""
+ldap_replication_use_ldaps: false
 ```
 
 Proxy variables are intentionally empty by default. Set them explicitly if your control node needs them for package installation or Docker builds.
@@ -166,6 +177,62 @@ Proxy variables are intentionally empty by default. Set them explicitly if your 
 - does not run a full LDIF restore
 - updates Compose, environment, TLS material, and related runtime settings in place
 - can restart the managed service if `ldap_maintenance_restart_container=true`
+
+## Optional LDAP Mirror Mode
+
+Set `ldap_mirrormode_enabled=true` to have the role configure data-database mirroring between two separately deployed guests. The role keeps this vars-driven so the same playbook can be used in standalone or mirrored mode.
+
+What the role reconciles when mirrormode is enabled:
+
+- `olcServerID` on `cn=config`
+- `syncprov` overlay on the main LDAP database
+- `olcSyncRepl` on the main LDAP database, pointing to the peer guest
+- `olcMultiProvider: TRUE` on the main LDAP database
+- optional replication ACL and unlimited replication search limits for `ldap_replication_bind_dn`
+- `slapadd -w` during `full_import`, plus node-specific `-S <serverID>` when mirrormode is enabled
+
+The role does not replicate `cn=config` itself between nodes. Each guest gets its own runtime config from Ansible, while the main directory database is mirrored over syncrepl.
+
+Standalone behavior:
+
+- with `ldap_mirrormode_enabled=false`, the role removes managed `olcServerID`, `olcSyncRepl`, `olcMultiProvider`, and the managed replication ACL/limits rule so the node can run standalone again
+
+Typical vars for node 1:
+
+```yaml
+ldap_mirrormode_enabled: true
+ldap_server_id: 101
+ldap_replication_peer_server_id: 102
+ldap_node_fqdn: t-v-nua.gironet.test.giro.hu
+ldap_node_ip: 10.0.1.221
+ldap_peer_fqdn: t-m-nua.gironet.test.giro.hu
+ldap_peer_ip: 10.0.1.222
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: "<mirror-password>"
+ldap_replication_use_ldaps: false
+```
+
+Typical vars for node 2:
+
+```yaml
+ldap_mirrormode_enabled: true
+ldap_server_id: 102
+ldap_replication_peer_server_id: 101
+ldap_node_fqdn: t-m-nua.gironet.test.giro.hu
+ldap_node_ip: 10.0.1.222
+ldap_peer_fqdn: t-v-nua.gironet.test.giro.hu
+ldap_peer_ip: 10.0.1.221
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: "<mirror-password>"
+ldap_replication_use_ldaps: false
+```
+
+If both nodes have LDAPS configured and certificates matching the guest FQDNs, switch replication to LDAPS with:
+
+```yaml
+ldap_enable_ldaps: true
+ldap_replication_use_ldaps: true
+```
 
 ## Host Paths And Ownership
 
