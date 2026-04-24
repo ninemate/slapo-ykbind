@@ -160,7 +160,7 @@
 - name: Assert mirrormode config is present
   ansible.builtin.assert:
     that:
-      - "'olcServerID: ' ~ ldap_server_id ~ ' ' ~ ldap_replication_self_uri_effective in (ldap_mirrormode_global_check.stdout | default(''))"
+      - "'olcServerID: ' ~ ldap_server_id in (ldap_mirrormode_global_check.stdout | default(''))"
       - "'olcMultiProvider: TRUE' in (ldap_mirrormode_db_check.stdout | default(''))"
       - "'provider=' ~ ldap_replication_peer_uri_effective in (ldap_mirrormode_db_check.stdout | default(''))"
     fail_msg: >-

@@ -4,7 +4,7 @@
 
 - name: Build desired replication config facts
   ansible.builtin.set_fact:
-    ldap_replication_server_id_value: "{{ ldap_server_id | string }} {{ ldap_replication_self_uri_effective }}"
+    ldap_replication_server_id_value: "{{ ldap_server_id | string }}"
     ldap_replication_syncrepl_value: >-
       rid={{ ldap_replication_rid_effective }}
       provider={{ ldap_replication_peer_uri_effective }}
