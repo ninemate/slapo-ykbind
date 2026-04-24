@@ -1,5 +1,5 @@
 ---
-- name: Create deploy directories on target host
+- name: Create root-owned deploy directories on target host
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -7,11 +7,45 @@
   loop:
     - "{{ ldap_deploy_root }}"
     - "{{ ldap_runtime_dir }}"
+    - "{{ ldap_remote_image_dir }}"
+
+- name: Create LDAP runtime asset directories on target host
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ ldap_runtime_ldif_dir }}"
+      mode: "0755"
+    - path: "{{ ldap_runtime_config_import_dir }}"
+      mode: "0755"
+    - path: "{{ ldap_runtime_schema_dir }}"
+      mode: "0755"
+    - path: "{{ ldap_runtime_import_dir }}"
+      mode: "0755"
+    - path: "{{ ldap_tls_host_dir }}"
+      mode: "0750"
+    - path: "{{ ldap_data_dir }}"
+      mode: "0750"
+    - path: "{{ ldap_config_dir }}"
+      mode: "0750"
+    - path: "{{ ldap_log_dir }}"
+      mode: "0750"
+
+- name: Align ownership recursively on LDAP bind-mount and runtime directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    recurse: true
+  loop:
     - "{{ ldap_runtime_ldif_dir }}"
     - "{{ ldap_runtime_config_import_dir }}"
     - "{{ ldap_runtime_schema_dir }}"
     - "{{ ldap_runtime_import_dir }}"
-    - "{{ ldap_remote_image_dir }}"
     - "{{ ldap_tls_host_dir }}"
     - "{{ ldap_data_dir }}"
     - "{{ ldap_config_dir }}"

@@ -2,19 +2,24 @@
 - name: Validate LDAP deploy mode
   ansible.builtin.assert:
     that:
-      - ldap_deploy_mode in ['full_import', 'adopt_existing', 'migration']
+      - ldap_deploy_mode in ['full_import', 'adopt_existing', 'maintenance', 'migration']
     fail_msg: >-
-      ldap_deploy_mode must be one of: full_import, adopt_existing.
+      ldap_deploy_mode must be one of: full_import, adopt_existing, maintenance.
       The old migration value is still accepted as an alias for full_import.
 
 - name: Resolve effective deploy mode
   ansible.builtin.set_fact:
-    ldap_mode: "{{ 'full_import' if ldap_deploy_mode in ['full_import', 'migration'] else 'adopt_existing' }}"
+    ldap_mode: >-
+      {{ 'full_import' if ldap_deploy_mode in ['full_import', 'migration']
+         else ldap_deploy_mode }}
 
 - name: Set mode facts
   ansible.builtin.set_fact:
     ldap_full_import_requested: "{{ ldap_mode == 'full_import' }}"
     ldap_adopt_existing_mode: "{{ ldap_mode == 'adopt_existing' }}"
+    ldap_maintenance_mode: "{{ ldap_mode == 'maintenance' }}"
+    ldap_requires_image_refresh: "{{ ldap_mode != 'maintenance' }}"
+    ldap_manage_runtime_config: "{{ ldap_mode in ['full_import', 'maintenance'] }}"
     ldap_ldif_import_src_path: >-
       {{ ldap_ldif_import_file if (ldap_ldif_import_file | length > 0 and ldap_ldif_import_file.startswith('/'))
          else (repo_root ~ '/' ~ ldap_ldif_import_file) if (ldap_ldif_import_file | length > 0)

@@ -6,6 +6,12 @@ ldap_container_base_image: debian:trixie
 ldap_docker_build_network: host
 ldap_skip_local_build: false
 ldap_skip_local_save: false
+ldap_runtime_user: ldap-runtime
+ldap_runtime_group: ldap-runtime
+ldap_runtime_uid: 11050
+ldap_runtime_gid: 11050
+ldap_container_ldap_port: 1389
+ldap_container_ldaps_port: 1636
 
 ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
 ldap_local_build_context_dir: "{{ ldap_local_artifact_root }}/context"
@@ -55,6 +61,7 @@ ldap_force_password_reset: false
 ldap_enable_syslog_ng: false
 ldap_open_files_limit: 1024
 ldap_deploy_mode: full_import
+ldap_maintenance_restart_container: false
 
 ldap_additional_schema_ldifs: []
 ldap_migration_config_ldifs: []

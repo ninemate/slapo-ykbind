@@ -105,6 +105,10 @@
       --network "{{ ldap_docker_build_network }}" \
       -t "{{ ldap_image_name }}" \
       --build-arg "BASE_IMAGE={{ ldap_container_base_image }}" \
+      --build-arg "LDAP_RUNTIME_USER={{ ldap_runtime_user }}" \
+      --build-arg "LDAP_RUNTIME_GROUP={{ ldap_runtime_group }}" \
+      --build-arg "LDAP_RUNTIME_UID={{ ldap_runtime_uid }}" \
+      --build-arg "LDAP_RUNTIME_GID={{ ldap_runtime_gid }}" \
       --build-arg "http_proxy={{ ldap_proxy_env.http_proxy | default(ldap_http_proxy) }}" \
       --build-arg "https_proxy={{ ldap_proxy_env.https_proxy | default(ldap_https_proxy) }}" \
       --build-arg "no_proxy={{ ldap_proxy_env.no_proxy | default(ldap_no_proxy) }}" \

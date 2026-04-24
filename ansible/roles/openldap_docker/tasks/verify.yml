@@ -27,7 +27,7 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
   register: ldap_whoami_check
   changed_when: false
   when: ldap_full_import_requested | bool
@@ -45,7 +45,7 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
       - -LLL
       - -b
       - "{{ ldap_base_dn }}"
@@ -93,7 +93,7 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
       - -LLL
       - -b
       - "{{ ldap_smoke_test_user_dn }}"

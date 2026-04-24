@@ -13,6 +13,7 @@
     dest: "{{ ldap_remote_image_archive }}"
     mode: "0644"
   register: ldap_remote_image_archive_copy
+  when: ldap_requires_image_refresh | bool
 
 - name: Check whether the image already exists on target host
   ansible.builtin.command:
@@ -24,6 +25,7 @@
   register: ldap_remote_image_inspect
   changed_when: false
   failed_when: false
+  when: ldap_requires_image_refresh | bool
 
 - name: Load prebuilt image on target host
   ansible.builtin.command:
@@ -32,7 +34,9 @@
       - load
       - -i
       - "{{ ldap_remote_image_archive }}"
-  when: ldap_remote_image_archive_copy.changed or ldap_remote_image_inspect.rc != 0
+  when:
+    - ldap_requires_image_refresh | bool
+    - ldap_remote_image_archive_copy.changed or ldap_remote_image_inspect.rc != 0
 
 - name: Start OpenLDAP container from prebuilt image
   ansible.builtin.command:
@@ -46,6 +50,20 @@
     chdir: "{{ ldap_deploy_root }}"
   register: ldap_compose_up
   changed_when: "'is up to date' not in (ldap_compose_up.stdout ~ ldap_compose_up.stderr)"
+
+- name: Restart maintained LDAP container when runtime files changed in place
+  ansible.builtin.command:
+    argv:
+      - docker-compose
+      - -f
+      - "{{ ldap_compose_file }}"
+      - restart
+      - openldap
+    chdir: "{{ ldap_deploy_root }}"
+  when:
+    - ldap_maintenance_mode | bool
+    - (ldap_maintenance_restart_container | bool) or (ldap_tls_material_changed | default(false) | bool)
+    - not (ldap_compose_up.changed | bool)
 
 - name: Wait for LDAP TCP listener on target host
   ansible.builtin.wait_for:

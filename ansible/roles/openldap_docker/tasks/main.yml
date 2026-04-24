@@ -2,8 +2,12 @@
 - name: Derive effective input values
   ansible.builtin.import_tasks: derive_inputs.yml
 
+- name: Prepare local artifact root on control node
+  ansible.builtin.import_tasks: local_artifacts.yml
+
 - name: Build image on control node
   ansible.builtin.import_tasks: local_build.yml
+  when: ldap_requires_image_refresh | bool
 
 - name: Install host prerequisites
   ansible.builtin.import_tasks: prerequisites.yml
@@ -25,11 +29,15 @@
 
 - name: Configure LDAP server
   ansible.builtin.import_tasks: configure.yml
-  when: ldap_full_import_requested | bool
+  when: ldap_manage_runtime_config | bool
 
 - name: Adopt existing LDAP state
   ansible.builtin.import_tasks: adopt_existing.yml
   when: ldap_adopt_existing_mode | bool
+
+- name: Maintain existing LDAP state
+  ansible.builtin.import_tasks: maintenance.yml
+  when: ldap_maintenance_mode | bool
 
 - name: Run full import tasks
   ansible.builtin.import_tasks: import.yml

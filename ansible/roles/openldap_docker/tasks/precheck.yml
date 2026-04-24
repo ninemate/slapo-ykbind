@@ -29,6 +29,15 @@
       to this mode.
   when: ldap_adopt_existing_mode | bool
 
+- name: Reject destructive import input in maintenance mode
+  ansible.builtin.assert:
+    that:
+      - ldap_ldif_import_file | length == 0
+    fail_msg: >-
+      maintenance mode never reloads the LDAP tree. Remove ldap_ldif_import_file
+      and use full_import if a full restore is required.
+  when: ldap_maintenance_mode | bool
+
 - name: Require existing cn=config directory for adopt_existing mode
   ansible.builtin.assert:
     that:
@@ -48,6 +57,97 @@
       adopt_existing mode requires a populated data directory at {{ ldap_data_dir }}.
       The directory is missing or empty on the target host.
   when: ldap_adopt_existing_mode | bool
+
+- name: Inspect existing LDAP container for maintenance mode
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - "{{ ldap_container_name }}"
+  register: ldap_maintenance_container_inspect_cmd
+  changed_when: false
+  failed_when: false
+  when: ldap_maintenance_mode | bool
+
+- name: Fail when maintenance mode cannot find the managed container
+  ansible.builtin.fail:
+    msg: >-
+      maintenance mode requires an already deployed LDAP container named
+      {{ ldap_container_name }}, but docker inspect could not find it.
+      Use full_import or adopt_existing for first-time deployment.
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc != 0
+
+- name: Store maintenance container metadata
+  ansible.builtin.set_fact:
+    ldap_maintenance_container_info: "{{ (ldap_maintenance_container_inspect_cmd.stdout | from_json | first) }}"
+    ldap_maintenance_container_labels: "{{ ((ldap_maintenance_container_inspect_cmd.stdout | from_json | first).Config.Labels | default({})) }}"
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc == 0
+
+- name: Derive maintenance container checks
+  ansible.builtin.set_fact:
+    ldap_maintenance_container_state: "{{ ldap_maintenance_container_info.State.Status | default('unknown') }}"
+    ldap_maintenance_managed_label_present: "{{ ldap_maintenance_container_labels.get('com.yubik.openldap.managed', 'false') == 'true' }}"
+    ldap_maintenance_mounts_match: >-
+      {{
+        ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', '/var/lib/ldap') | map(attribute='Source') | list | first | default('')) == ldap_data_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', '/etc/ldap/slapd.d') | map(attribute='Source') | list | first | default('')) == ldap_config_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', '/var/log/slapd') | map(attribute='Source') | list | first | default('')) == ldap_log_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', ldap_container_bootstrap_dir ~ '/ldif') | map(attribute='Source') | list | first | default('')) == ldap_runtime_ldif_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', ldap_container_bootstrap_dir ~ '/schema') | map(attribute='Source') | list | first | default('')) == ldap_runtime_schema_dir)
+      }}
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc == 0
+
+- name: Derive maintenance legacy signature match
+  ansible.builtin.set_fact:
+    ldap_maintenance_legacy_match: >-
+      {{
+        ((ldap_maintenance_container_info.Config.Image | default('')) == ldap_image_name)
+        and (ldap_maintenance_mounts_match | default(false))
+      }}
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc == 0
+
+- name: Require a playbook-managed container signature for maintenance mode
+  ansible.builtin.assert:
+    that:
+      - ldap_maintenance_mounts_match | bool
+      - ldap_maintenance_managed_label_present or ldap_maintenance_legacy_match
+    fail_msg: >-
+      maintenance mode found container {{ ldap_container_name }}, but it does not
+      match the bind mounts and managed-service metadata expected by this role.
+      Refusing in-place modification to avoid touching an unrelated LDAP container.
+  when: ldap_maintenance_mode | bool
+
+- name: Require matching runtime uid/gid for managed maintenance mode
+  ansible.builtin.assert:
+    that:
+      - ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-uid', ldap_runtime_uid | string) == (ldap_runtime_uid | string)
+      - ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-gid', ldap_runtime_gid | string) == (ldap_runtime_gid | string)
+    fail_msg: >-
+      maintenance mode cannot change ldap_runtime_uid/gid without rebuilding the image.
+      The managed container labels report uid={{ ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-uid', 'unknown') }}
+      gid={{ ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-gid', 'unknown') }},
+      but the requested values are uid={{ ldap_runtime_uid }} gid={{ ldap_runtime_gid }}.
+      Use full_import or adopt_existing with image rebuild for a runtime uid/gid change.
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_managed_label_present | bool
+
+- name: Show detected target state for maintenance mode
+  ansible.builtin.debug:
+    msg:
+      - "maintenance mode will update the existing managed container in place."
+      - "container_state={{ ldap_maintenance_container_state }}"
+      - "managed_label={{ ldap_maintenance_managed_label_present }}"
+      - "legacy_signature_match={{ ldap_maintenance_legacy_match }}"
+  when: ldap_maintenance_mode | bool
 
 - name: Show detected target state for full_import mode
   ansible.builtin.debug:

@@ -1,4 +1,8 @@
 ARG BASE_IMAGE=debian:trixie
+ARG LDAP_RUNTIME_USER=ldap-runtime
+ARG LDAP_RUNTIME_GROUP=ldap-runtime
+ARG LDAP_RUNTIME_UID=11050
+ARG LDAP_RUNTIME_GID=11050
 
 FROM ${BASE_IMAGE} AS builder
 
@@ -74,6 +78,10 @@ ARG no_proxy=localhost,127.0.0.1
 ARG HTTP_PROXY=http://proxy.example.net:3128
 ARG HTTPS_PROXY=http://proxy.example.net:3128
 ARG NO_PROXY=localhost,127.0.0.1
+ARG LDAP_RUNTIME_USER=ldap-runtime
+ARG LDAP_RUNTIME_GROUP=ldap-runtime
+ARG LDAP_RUNTIME_UID=11050
+ARG LDAP_RUNTIME_GID=11050
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV http_proxy=${http_proxy}
@@ -91,15 +99,18 @@ RUN set -eux; \
     echo "slapd slapd/no_configuration boolean true" | debconf-set-selections; \
     apt-get -y update; \
     apt-get -y install --no-install-recommends telnet tcpdump vim net-tools procps openssh-client; \
-    apt-get -y install --no-install-recommends slapd ldap-utils syslog-ng logrotate ca-certificates; \
+    apt-get -y install --no-install-recommends slapd ldap-utils syslog-ng logrotate ca-certificates gosu; \
     rm -rf /var/lib/apt/lists/*; \
-    mkdir -p /opt/openldap/bootstrap /var/log/slapd; \
+    groupadd --gid "${LDAP_RUNTIME_GID}" "${LDAP_RUNTIME_GROUP}"; \
+    useradd --uid "${LDAP_RUNTIME_UID}" --gid "${LDAP_RUNTIME_GID}" --home-dir /nonexistent --shell /usr/sbin/nologin --no-create-home "${LDAP_RUNTIME_USER}"; \
+    mkdir -p /opt/openldap/bootstrap /etc/ldap/tls /run/slapd /var/log/slapd; \
+    chown -R "${LDAP_RUNTIME_UID}:${LDAP_RUNTIME_GID}" /opt/openldap/bootstrap /etc/ldap/tls /run/slapd /var/log/slapd /var/lib/ldap /etc/ldap/slapd.d; \
     chmod +x /entrypoint.sh /healthcheck.sh
 
 COPY syslog-ng.conf /etc/syslog-ng/syslog-ng.conf
 COPY --from=builder /build-out/usr/lib/ldap/ /usr/lib/ldap/
 
-EXPOSE 389 636
+EXPOSE 1389 1636
 VOLUME ["/var/lib/ldap", "/etc/ldap/slapd.d", "/var/log/slapd"]
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 CMD ["/healthcheck.sh"]

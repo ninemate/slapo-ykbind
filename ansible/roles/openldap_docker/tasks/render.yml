@@ -2,12 +2,16 @@
   ansible.builtin.copy:
     src: "{{ repo_root }}/schema/yubikey-otp.ldif"
     dest: "{{ ldap_runtime_schema_dir }}/yubikey-otp.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
 
 - name: Copy optional TLS material to target host
   ansible.builtin.copy:
     src: "{{ item.src if item.src.startswith('/') else repo_root ~ '/' ~ item.src }}"
     dest: "{{ ldap_tls_host_dir }}/{{ item.dest }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "{{ item.mode }}"
   loop:
     - src: "{{ ldap_tls_certificate_src }}"
@@ -22,11 +26,14 @@
   when:
     - ldap_enable_ldaps | bool
     - item.src | length > 0
+  register: ldap_tls_material_copy
 
 - name: Copy additional schema LDIFs to target host
   ansible.builtin.copy:
     src: "{{ item if item.startswith('/') else repo_root ~ '/' ~ item }}"
     dest: "{{ ldap_runtime_schema_dir }}/{{ item | basename }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   loop: "{{ ldap_additional_schema_ldifs }}"
   when: ldap_additional_schema_ldifs | length > 0
@@ -35,9 +42,18 @@
   ansible.builtin.copy:
     src: "{{ item if item.startswith('/') else repo_root ~ '/' ~ item }}"
     dest: "{{ ldap_runtime_config_import_dir }}/{{ item | basename }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   loop: "{{ ldap_migration_config_ldifs }}"
   when: ldap_migration_config_ldifs | length > 0
+
+- name: Store TLS material change state
+  ansible.builtin.set_fact:
+    ldap_tls_material_changed: >-
+      {{
+        (ldap_tls_material_copy.results | default([]) | selectattr('changed', 'equalto', true) | list | length) > 0
+      }}
 
 - name: Render Docker Compose manifest
   ansible.builtin.template:
@@ -49,6 +65,8 @@
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ ldap_runtime_ldif_dir }}/{{ item.dest }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   loop:
     - src: tls-config.ldif.j2

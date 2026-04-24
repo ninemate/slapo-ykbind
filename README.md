@@ -5,12 +5,15 @@ Ez a repository két dolgot ad egyben:
 1. egy saját `ykbind` OpenLDAP overlay modult YubiKey OTP ellenőrzéssel
 2. egy teljes, Ansible-alapú, Dockeres deploy megoldást Debian 13 alapú OpenLDAP szerverhez
 
-A cél a "one click" deploy két tiszta móddal:
+A cél a "one click" deploy három tiszta móddal:
 
 - `full_import`: teljesen szűz célra épít új `cn=config`-et, majd explicit config/schema/data importtal tölti fel az LDAP-ot
 - `adopt_existing`: meglévő `cn=config` és adatkönyvtár bind mounttal indul, és nem próbálja átírni a meglévő LDAP állapotot
+- `maintenance`: meglévő, ezzel a role-lal kezelt konténeres LDAP stacket módosít in-place image rebuild és DB újratöltés nélkül
 
-Egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et, tarballként áttölti az LDAP VM-re, elindítja a konténert, majd a választott módnak megfelelően vagy végrehajtja a teljes importot, vagy átveszi a meglévő bare-metal OpenLDAP állapotot konténerben.
+Az OpenLDAP folyamat a konténerben nem rootként fut: a role saját, paraméterezhető `ldap-runtime` user/group accountot épít az image-be, és alapból `11050:11050` uid/gid alatt indítja a `slapd`-t. A host oldali bind mountok ownershipjét ehhez igazítja.
+
+Egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et, tarballként áttölti az LDAP VM-re, elindítja a konténert, majd a választott módnak megfelelően teljes importot végez, átveszi a meglévő állapotot, vagy biztonságos maintenance frissítést hajt végre.
 
 ## Mit csinál a playbook
 
@@ -22,14 +25,17 @@ Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansibl
 - a kész image-et `docker save`-val exportálja
 - átmásolja az image tarballt a cél hostra és `docker load`-dal betölti
 - létrehozza a target hoston a deploy könyvtárakat
+- a bind mountolt `data/`, `config/`, `logs/`, `runtime/` és `runtime/tls/` ownershipjét a dedikált runtime uid/gid értékre állítja
 - elindítja a konténert Docker Compose-szal
 - inicializálja a slapd konfigurációt és a választott init módot az [docker/openldap/entrypoint.sh](/home/username/Documents/yubik/docker/openldap/entrypoint.sh) segítségével
+- a konténeren belül rootként csak az előkészítő bootstrap és jogosultság-javítás fut, a `slapd` folyamat maga dedikált non-root userrel indul
 - `full_import` módban szándékosan újra létrehozza a perzisztens `data/` és `config/` könyvtárakat
 - `full_import` módban minimális, szűz `cn=config`-et bootstrapol
 - `full_import` módban opcionális hordozható `cn=config` módosító LDIF-eket alkalmaz
 - `full_import` módban betölti a `yubikey-otp` schema-t, az extra schema LDIF-eket, a `ykbind.so` modult és az overlayt
 - `full_import` módban opcionálisan kiszűri a nem támogatott LDIF részeket, majd offline `slapadd`-dal importálja a teljes tree-t
 - `adopt_existing` módban a már meglévő bind mountolt `cn=config` és adatállapotot használja, és nem próbálja újraimportálni a schema/modul/overlay konfigurációt
+- `maintenance` módban csak a konfigurációs, TLS és compose/runtime változásokat viszi át; nem buildel új image-et és nem írja felül az adatbázist
 - lefuttatja a megfelelő smoke teszteket
 
 ## Branch kontextus
@@ -115,6 +121,10 @@ ldap_container_name: openldap-ykbind
 ldap_image_name: openldap-ykbind:latest
 ldap_container_base_image: debian:trixie
 ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
+ldap_runtime_user: ldap-runtime
+ldap_runtime_group: ldap-runtime
+ldap_runtime_uid: 11050
+ldap_runtime_gid: 11050
 
 ldap_http_proxy: http://proxy.example.net:3128
 ldap_https_proxy: http://proxy.example.net:3128
@@ -122,8 +132,11 @@ ldap_no_proxy: localhost,127.0.0.1
 
 ldap_listen_port: 389
 ldap_ldaps_port: 636
+ldap_container_ldap_port: 1389
+ldap_container_ldaps_port: 1636
 ldap_enable_ldaps: false
 ldap_deploy_mode: full_import
+ldap_maintenance_restart_container: false
 
 ldap_migration_config_ldifs: []
 ldap_ldif_import_file: ""
@@ -148,8 +161,14 @@ További fontos, deploy közben gyakran használt változók:
 - `ldap_skip_local_build`
 - `ldap_skip_local_save`
 - `ldap_deploy_mode`
+- `ldap_runtime_user`
+- `ldap_runtime_group`
+- `ldap_runtime_uid`
+- `ldap_runtime_gid`
 - `ldap_data_dir`
 - `ldap_config_dir`
+- `ldap_log_dir`
+- `ldap_tls_host_dir`
 - `ldap_migration_config_ldifs`
 - `ldap_ldif_import_file`
 - `ldap_ldif_filter_enabled`
@@ -161,6 +180,7 @@ További fontos, deploy közben gyakran használt változók:
 - `ldap_tls_certificate_src`
 - `ldap_tls_private_key_src`
 - `ldap_tls_ca_src`
+- `ldap_maintenance_restart_container`
 - `ldap_smoke_test_user_dn`
 
 Felülírási lehetőségek:
@@ -194,6 +214,19 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e ldap_data_dir=/opt/openldap-ykbind/data
 ```
 
+`maintenance` példa meglévő konténeres stack módosítására:
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=maintenance \
+  -e ldap_enable_ldaps=true \
+  -e ldap_tls_certificate_src=tls/tls.crt \
+  -e ldap_tls_private_key_src=tls/tls.key \
+  -e ldap_tls_ca_src=tls/ca.crt \
+  -e ldap_maintenance_restart_container=true
+```
+
 Ha a local image már biztosan elkészült a control node-on, újrafuttatáskor a build kihagyható:
 
 ```bash
@@ -215,9 +248,11 @@ Deploy mód megjegyzés:
 
 - `ldap_deploy_mode=full_import`: migration-first mód; a role automatikusan újra létrehozza a perzisztens `data/` és `config/` könyvtárakat, `LDAP_INIT_MODE=config-only` módban indítja a konténert, majd explicit config/schema/data importot hajt végre
 - `ldap_deploy_mode=adopt_existing`: meglévő bind mountolt `cn=config` és adatállapotot használ; a role `LDAP_INIT_MODE=disabled` módban indít, és nem próbál módosító init/import műveleteket futtatni
+- `ldap_deploy_mode=maintenance`: meglévő, a role által kezelt konténeren fut; ellenőrzi a container name-et, a bind mountokat és a managed labelt vagy a legacy signature-t, majd csak in-place frissítéseket végez
 - a régi `migration` módnév továbbra is elfogadott, belsőleg `full_import`-ként viselkedik
 - ha a `ldap_base_dn` még az alap `dc=example,dc=org` értéken van, full import módban a role megpróbálja az import LDIF első `dn:` sorából levezetni
 - ha az admin DN is még alapértéken van, full import módban azt `cn=admin,<derived_base_dn>` formára állítja
+- `full_import` és `adopt_existing` módban image build és `docker load` történik; `maintenance` módban ez a két lépés kimarad
 
 ## A deploy által létrehozott target oldali könyvtárak
 
@@ -236,6 +271,14 @@ Fontos alkönyvtárak a target hoston:
 - `data/`: LDAP adat perzisztencia
 - `config/`: `cn=config` perzisztencia
 - `logs/`: log perzisztencia
+
+Ownership szabályok:
+
+- a writable és a `slapd` által olvasott bind mountok alapból `11050:11050` tulajdonba kerülnek
+- ez a `ldap_runtime_uid` és `ldap_runtime_gid` változókkal módosítható
+- a role a hoston rekurzívan igazítja a `data/`, `config/`, `logs/`, `runtime/ldif/`, `runtime/schema/`, `runtime/ldif/imports/`, `runtime/ldif/config-imports/` és `runtime/tls/` ownershipjét
+- a TLS private key alapból `0600`, a cert és CA `0644`, mindhárom a runtime uid/gid tulajdonában
+- a konténer belül a `slapd` magas belső portokon figyel: `1389` és opcionálisan `1636`; a host oldali publikált port marad `389` és `636`
 
 Lokális control node build artifactok alapértelmezett helye:
 
@@ -377,7 +420,7 @@ Az import sorrendje a playbookban:
 
 1. Docker image build/load
 2. perzisztens `data/` és `config/` könyvtárak újra létrehozása
-3. konténerindítás `LDAP_INIT_MODE=config-only` módban
+3. konténerindítás `LDAP_INIT_MODE=config-only` módban, non-root `slapd` runtime-mal
 4. suffix/rootDN/rootPW beállítás a cél `cn=config` alatt
 5. `ldap_migration_config_ldifs` alkalmazása `ldapmodify -Y EXTERNAL` paranccsal
 6. bundled `yubikey-otp` schema és `ldap_additional_schema_ldifs` betöltése
@@ -410,7 +453,36 @@ Ebben a módban:
 - a role nem futtat migration config LDIF-et
 - a role nem módosítja a `cn=module` entryt
 - a role nem hoz létre base DN-t vagy OU-kat
+- a role a host oldali ownershipet a dedikált runtime uid/gid értékre igazítja, hogy a non-root konténer írni tudjon
 - a role csak külső `ldapi:///` smoke teszteket fut
+
+## Maintenance futtatása
+
+`maintenance` módban a role csak már korábban ezzel a stackkel deployolt konténeres LDAP szolgáltatást fogad el. Ellenőrzi a `ldap_container_name` alatti konténert, a bind mountokat és a managed metadata-t, és ha ezek nem illenek a várt stackre, hibával leáll.
+
+```bash
+cd /home/username/Documents/yubik/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  --limit ldap_existing_host \
+  -Kk \
+  -e ldap_deploy_mode=maintenance \
+  -e ldap_enable_ldaps=true \
+  -e ldap_tls_certificate_src=tls/tls.crt \
+  -e ldap_tls_private_key_src=tls/tls.key \
+  -e ldap_tls_ca_src=tls/ca.crt
+```
+
+Ebben a módban:
+
+- nincs local docker build
+- nincs `docker save` vagy `docker load`
+- nincs `data/` vagy `config/` reset
+- nincs full-tree LDIF import
+- nincs destruktív DB újrainicializálás
+- van compose/template/env frissítés
+- van TLS fájl frissítés
+- van idempotens schema/module/overlay/TLS config ellenőrzés és szükség esetén `ldapmodify`
+- opcionálisan van kontrollált restart a `ldap_maintenance_restart_container=true` változóval
 
 Fontos restore megjegyzések:
 
@@ -422,7 +494,7 @@ Fontos restore megjegyzések:
 
 ## TLS / LDAPS
 
-Az image nyitja a `389` és `636` portot. A playbook támogatja az LDAPS bekapcsolását, de a tanúsítványkezelést szándékosan egyszerű, bővíthető formában hagyja meg.
+A konténeren belül a `slapd` a `1389` és `1636` magas portokat használja, a host felé továbbra is a `389` és `636` portok publikálódnak. A playbook támogatja az LDAPS bekapcsolását, de a tanúsítványkezelést szándékosan egyszerű, bővíthető formában hagyja meg.
 
 Legkényelmesebb használat:
 
@@ -441,6 +513,8 @@ Ekkor a role:
 - bemásolja a fájlokat a target host `runtime/tls/` könyvtárába
 - mountolja őket a konténerbe
 - beírja az LDAP TLS útvonalakat a `cn=config` alá
+- maintenance módban image rebuild nélkül is tudja frissíteni a fájlokat
+- ha a cert/key tartalma változott, állítsd `ldap_maintenance_restart_container=true` értékre, hogy a futó `slapd` biztosan újranyissa a fájlokat
 
 Használt változók:
 
@@ -465,6 +539,7 @@ Fő pontok:
 - a builder stage OpenLDAP forrásból futtatott `configure`, `make depend` és `make -C include` lépéssel állítja elő a modulhoz szükséges `portable.h`, `ldap_features.h` és `ldap_config.h` headereket
 - a repositoryban lévő [Makefile](/home/username/Documents/yubik/Makefile) fut
 - a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
+- a runtime image saját `ldap-runtime` user/group accountot hoz létre, és a `slapd` `gosu` segítségével erre a dedikált uid/gid-re vált induláskor
 - a kész image a control node-on tarballként exportálódik
 - a tarball a cél LDAP hostra kerül és ott `docker load` importálja
 - a playbook utána ellenőrzi a `cn=config` alatti module listákat, és csak akkor tölti be a modult, ha még nincs jelen
@@ -498,6 +573,7 @@ A deploy során a role:
 - `full_import` módban szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
 - `full_import` módban betölti a modult és felveszi az overlayt
 - `adopt_existing` módban nem futtat destruktív vagy módosító init/import műveleteket a meglévő `cn=config` ellen
+- `maintenance` módban idempotens schema/module/overlay/TLS config ellenőrzést és szükség esetén update-et futtat, de nem írja felül az adatfát
 
 A schema import nem fix `cn={N}` indexre támaszkodik. A role minden schema import előtt kiolvassa a teljes `cn=schema,cn=config` tartalmat, majd a betöltendő LDIF-et schema entrynként hasonlítja össze a meglévő állapottal. Egy teljes forrásoldali `cn=schema,cn=config` dump is megadható: a már meglévő beépített schema entryk kimaradnak, és csak a teljesen hiányzó custom schema entryk kerülnek egy szűrt import LDIF-be. Ha egy hiányzó nevű entry OID-jai részben már léteznek más schema alatt, a playbook hibával megáll, mert az `ldapadd` ilyen esetben `duplicate attributeType` hibával bukna.
 
@@ -508,6 +584,12 @@ Az entrypoint init módjai:
 - `LDAP_INIT_MODE=disabled`: nincs bootstrap; csak előre mountolt, érvényes `/etc/ldap/slapd.d` mellett használható
 
 Megjegyzés: `full_import` módban a `slapd` Debianos inicializálása csak átmeneti, minimális `cn=config` állapot előállítására szolgál. A role ezután explicit config/schema/data import lépésekkel készíti elő a cél LDAP-ot. `adopt_existing` módban ez a bootstrap nem fut le, mert a konténer közvetlenül a már meglévő bind mountolt `cn=config`-ből indul.
+
+Runtime megjegyzés:
+
+- a container entrypoint rootként csak bootstrapol és ownershipet igazít
+- a tényleges `slapd` folyamat dedikált `ldap_runtime_uid:ldap_runtime_gid` accounttal fut
+- a host oldali bind mountok ownershipje ezért ugyanarra a numerikus uid/gid-re áll be
 
 Konténer-specifikus megjegyzés:
 
@@ -531,7 +613,7 @@ Admin bind:
 docker exec openldap-ykbind ldapwhoami \
   -x -D "cn=admin,dc=example,dc=org" \
   -w '<set-admin-password>' \
-  -H ldap://127.0.0.1
+  -H ldap://127.0.0.1:1389
 ```
 
 Base query:
@@ -540,7 +622,7 @@ Base query:
 docker exec openldap-ykbind ldapsearch \
   -x -D "cn=admin,dc=example,dc=org" \
   -w '<set-admin-password>' \
-  -H ldap://127.0.0.1 \
+  -H ldap://127.0.0.1:1389 \
   -LLL -b "dc=example,dc=org" -s base "(objectClass=*)" dn
 ```
 
@@ -744,3 +826,4 @@ Ezek főleg debughoz és kézi finomhangoláshoz hasznosak; a normál deploy út
 - a `olcRootPW` idempotens cseréje csak akkor fut le, ha a suffix/rootDN eltér vagy a `ldap_force_password_reset=true`
 - a `ldap_domain` és `ldap_base_dn` eltérése támogatott, de nem ez a Debian `slapd` inicializálás natív útja
 - TLS esetén a tanúsítványanyag meglétét a role ellenőrzi, de a PKI életciklus-kezelést nem automatizálja
+- maintenance mód csak a role által kezelt, mount- és metadata-szinten felismerhető konténeren fut

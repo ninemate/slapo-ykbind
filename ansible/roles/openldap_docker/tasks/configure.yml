@@ -1,12 +1,15 @@
 ---
-- name: Discover fresh cn=config state for full_import mode
+- name: Discover live cn=config state before runtime configuration
   ansible.builtin.import_tasks: discover.yml
 
 - name: Render overlay config LDIF after database discovery
   ansible.builtin.template:
     src: overlay-config.ldif.j2
     dest: "{{ ldap_runtime_ldif_dir }}/overlay-config.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
+  when: ldap_module_build_enabled | bool
 
 - name: Hash admin password for rootDN reset
   ansible.builtin.command:
@@ -20,16 +23,20 @@
   register: ldap_admin_password_hash_cmd
   changed_when: false
   when:
+    - ldap_full_import_requested | bool
     - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
 - name: Render database config update LDIF
   ansible.builtin.template:
     src: database-config.ldif.j2
     dest: "{{ ldap_runtime_ldif_dir }}/database-config.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   vars:
     ldap_admin_password_hash: "{{ ldap_admin_password_hash_cmd.stdout }}"
   when:
+    - ldap_full_import_requested | bool
     - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
 - name: Update LDAP suffix, rootDN and rootPW for full_import
@@ -47,6 +54,7 @@
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/database-config.ldif"
   when:
+    - ldap_full_import_requested | bool
     - ldap_current_suffix != ldap_base_dn or ldap_current_rootdn != ldap_admin_dn or (ldap_force_password_reset | bool)
 
 - name: Apply optional migration config LDIFs
@@ -118,6 +126,8 @@
   ansible.builtin.template:
     src: module-load.ldif.j2
     dest: "{{ ldap_runtime_ldif_dir }}/module-load.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   when: (ldap_module_build_enabled | bool) and not (ldap_module_loaded | default(false) | bool)
 

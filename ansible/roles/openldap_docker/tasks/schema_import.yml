@@ -61,6 +61,8 @@
   ansible.builtin.copy:
     src: "{{ ldap_local_artifact_root }}/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
     dest: "{{ ldap_runtime_schema_dir }}/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   when: "'state=missing' in ldap_schema_import_state.stdout"
 

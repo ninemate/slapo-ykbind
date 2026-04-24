@@ -42,7 +42,7 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
       - -LLL
       - -b
       - "{{ ldap_base_dn }}"
@@ -105,8 +105,10 @@
       - chown
       - "{{ ldap_image_name }}"
       - -R
-      - openldap:openldap
+      - "{{ ldap_runtime_user }}:{{ ldap_runtime_group }}"
       - /var/lib/ldap
+      - /etc/ldap/slapd.d
+      - /var/log/slapd
 
 - name: Start OpenLDAP container after full tree restore
   ansible.builtin.command:
