@@ -126,16 +126,17 @@
     ldap_replication_module_config_exists: "{{ (ldap_replication_module_state.stdout_lines | select('match', '^dn=') | list | length) > 0 }}"
     ldap_replication_module_path_present: "{{ (ldap_replication_module_state.stdout_lines | select('match', '^path=') | list | length) > 0 }}"
     ldap_replication_module_loaded: "{{ ldap_replication_module_name in ((ldap_replication_module_state.stdout_lines | select('match', '^load=') | map('regex_replace', '^load=', '') | list) | join('\n')) }}"
-    ldap_replication_current_server_ids: "{{ ldap_replication_global_state.stdout_lines | select('match', '^olcServerID: ') | map('regex_replace', '^olcServerID: ', '') | list }}"
-    ldap_replication_current_syncrepl_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcSyncRepl: ') | map('regex_replace', '^olcSyncRepl: ', '') | list }}"
-    ldap_replication_current_multiprovider_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcMultiProvider: ') | map('regex_replace', '^olcMultiProvider: ', '') | list }}"
-    ldap_replication_current_access_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | list }}"
-    ldap_replication_current_limits_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | list }}"
-    ldap_replication_current_access_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
-    ldap_replication_current_limits_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
-    ldap_replication_syncprov_dn: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^dn: ') | map('regex_replace', '^dn: ', '') | list | first | default('') }}"
-    ldap_replication_syncprov_checkpoint_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpCheckpoint: ') | map('regex_replace', '^olcSpCheckpoint: ', '') | list }}"
-    ldap_replication_syncprov_sessionlog_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpSessionlog: ') | map('regex_replace', '^olcSpSessionlog: ', '') | list }}"
+    ldap_replication_current_server_ids: "{{ ldap_replication_global_state.stdout_lines | select('match', '(?i)^olcserverid: ') | map('regex_replace', '(?i)^olcserverid: ', '') | list }}"
+    ldap_replication_current_syncrepl_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olcsyncrepl: ') | map('regex_replace', '(?i)^olcsyncrepl: ', '') | list }}"
+    ldap_replication_current_multiprovider_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olcmultiprovider: ') | map('regex_replace', '(?i)^olcmultiprovider: ', '') | list }}"
+    ldap_replication_current_access_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olcaccess: ') | map('regex_replace', '(?i)^olcaccess: ', '') | list }}"
+    ldap_replication_current_limits_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olclimits: ') | map('regex_replace', '(?i)^olclimits: ', '') | list }}"
+    ldap_replication_current_syncrepl_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olcsyncrepl: ') | map('regex_replace', '(?i)^olcsyncrepl: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
+    ldap_replication_current_access_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olcaccess: ') | map('regex_replace', '(?i)^olcaccess: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
+    ldap_replication_current_limits_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '(?i)^olclimits: ') | map('regex_replace', '(?i)^olclimits: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
+    ldap_replication_syncprov_dn: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '(?i)^dn: ') | map('regex_replace', '(?i)^dn: ', '') | list | first | default('') }}"
+    ldap_replication_syncprov_checkpoint_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '(?i)^olcspcheckpoint: ') | map('regex_replace', '(?i)^olcspcheckpoint: ', '') | list }}"
+    ldap_replication_syncprov_sessionlog_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '(?i)^olcspsessionlog: ') | map('regex_replace', '(?i)^olcspsessionlog: ', '') | list }}"
 
 - name: Store current replication rule match facts
   ansible.builtin.set_fact:
@@ -160,14 +161,14 @@
         (
           (ldap_mirrormode_enabled | bool)
           and (
-            (ldap_replication_current_syncrepl_values != [ldap_replication_syncrepl_value])
+            (ldap_replication_current_syncrepl_values_normalized != [ldap_replication_syncrepl_value])
             or ((ldap_replication_current_multiprovider_values | map('lower') | list) != ['true'])
           )
         )
         or (
           not (ldap_mirrormode_enabled | bool)
           and (
-            (ldap_replication_current_syncrepl_values | length > 0)
+            (ldap_replication_current_syncrepl_values_normalized | length > 0)
             or (ldap_replication_current_multiprovider_values | length > 0)
           )
         )

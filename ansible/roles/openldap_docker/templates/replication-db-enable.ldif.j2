@@ -1,6 +1,6 @@
 dn: {{ ldap_database_config_dn }}
 changetype: modify
-{% if ldap_replication_current_syncrepl_values | length > 0 %}
+{% if ldap_replication_current_syncrepl_values_normalized | length > 0 %}
 replace: olcSyncRepl
 {% else %}
 add: olcSyncRepl
