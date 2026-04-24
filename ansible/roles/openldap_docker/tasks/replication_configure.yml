@@ -136,6 +136,9 @@
     ldap_replication_syncprov_dn: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^dn: ') | map('regex_replace', '^dn: ', '') | list | first | default('') }}"
     ldap_replication_syncprov_checkpoint_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpCheckpoint: ') | map('regex_replace', '^olcSpCheckpoint: ', '') | list }}"
     ldap_replication_syncprov_sessionlog_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpSessionlog: ') | map('regex_replace', '^olcSpSessionlog: ', '') | list }}"
+
+- name: Store current replication rule match facts
+  ansible.builtin.set_fact:
     ldap_replication_access_rule_matches: "{{ ldap_replication_current_access_values | select('search', ldap_replication_access_rule_pattern) | list }}"
     ldap_replication_limits_rule_matches: "{{ ldap_replication_current_limits_values | select('match', '^(\\{[0-9]+\\})?' ~ ldap_replication_limits_rule_pattern | regex_replace('^\\^', '')) | list }}"
 
