@@ -76,6 +76,41 @@
          else ('%03d' | format((ldap_replication_peer_server_id | int) % 1000)) if (ldap_replication_peer_server_id | string | length > 0)
          else '' }}
 
+- name: Set effective RADIUS LDAP endpoint selector facts
+  ansible.builtin.set_fact:
+    radius_ldap_host_effective: >-
+      {{ radius_ldap_host
+         if (
+           (radius_ldap_host | string | length > 0)
+           and not (
+             (radius_ldap_host == 'openldap')
+             and (radius_ldap_server | string | length > 0)
+             and (radius_ldap_server != radius_ldap_host)
+           )
+         )
+         else radius_ldap_server }}
+    radius_ldap_use_ldaps_effective: "{{ (radius_ldap_use_ldaps | bool) and not (radius_ldap_start_tls | bool) }}"
+
+- name: Set effective RADIUS LDAP connection facts
+  ansible.builtin.set_fact:
+    radius_ldap_port_effective: >-
+      {{ (radius_ldap_port | int)
+         if (
+           ((radius_ldap_port | string) != (ldap_container_ldap_port | string))
+           or not (radius_ldap_use_ldaps_effective | bool)
+         )
+         else (ldap_container_ldaps_port | int) }}
+    radius_ldap_uri_scheme_effective: "{{ (radius_ldap_use_ldaps_effective | bool) | ternary('ldaps', 'ldap') }}"
+
+- name: Set effective RADIUS LDAP URI facts
+  ansible.builtin.set_fact:
+    radius_dynamic_client_ldap_uri_effective: >-
+      {{ radius_dynamic_client_ldap_uri
+         if (radius_dynamic_client_ldap_uri | string | length > 0)
+         else (radius_ldap_uri_scheme_effective ~ '://' ~ radius_ldap_host_effective ~ ':' ~ (radius_ldap_port_effective | string)) }}
+    radius_container_healthcheck_ldap_uri_effective: >-
+      {{ radius_ldap_uri_scheme_effective ~ '://' ~ radius_ldap_host_effective ~ ':' ~ (radius_ldap_port_effective | string) }}
+
 - name: Set derived RADIUS main config path fact
   ansible.builtin.set_fact:
     radius_main_config_src_path: >-

@@ -188,16 +188,21 @@
   ansible.builtin.stat:
     path: "{{ item }}"
   loop:
-    - "{{ ldap_tls_host_dir }}/tls.crt"
-    - "{{ ldap_tls_host_dir }}/tls.key"
-    - "{{ ldap_tls_host_dir }}/ca.crt"
+    - "{{ ldap_tls_host_dir }}/{{ ldap_tls_cert_file | basename }}"
+    - "{{ ldap_tls_host_dir }}/{{ ldap_tls_key_file | basename }}"
   register: ldap_tls_file_stats
   when: ldap_enable_ldaps | bool
 
-- name: Fail when LDAPS is enabled but TLS files are missing
+- name: Fail when LDAPS is enabled but server certificate material is missing
   ansible.builtin.fail:
-    msg: "LDAPS engedélyezve van, de hiányzik legalább egy fájl a {{ ldap_tls_host_dir }} könyvtárból."
+    msg: "LDAPS engedélyezve van, de hiányzik a szerver tanúsítvány vagy a privát kulcs a {{ ldap_tls_host_dir }} könyvtárból."
   when: (ldap_enable_ldaps | bool) and (ldap_tls_file_stats.results | default([]) | selectattr('stat.exists', 'equalto', false) | list | length > 0)
+
+- name: Check whether an optional TLS CA file exists on the target host
+  ansible.builtin.stat:
+    path: "{{ ldap_tls_host_dir }}/{{ ldap_tls_ca_file | basename }}"
+  register: ldap_tls_ca_file_stat
+  when: ldap_enable_ldaps | bool
 
 - name: Read current TLS configuration
   ansible.builtin.command:
@@ -238,4 +243,16 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/ldif/tls-config.ldif"
-  when: (ldap_enable_ldaps | bool) and (ldap_tls_cert_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_key_file not in (ldap_tls_config_check.stdout | default('')) or ldap_tls_ca_file not in (ldap_tls_config_check.stdout | default('')))
+  when: >-
+    (ldap_enable_ldaps | bool) and (
+      (ldap_tls_cert_file not in (ldap_tls_config_check.stdout | default('')))
+      or (ldap_tls_key_file not in (ldap_tls_config_check.stdout | default('')))
+      or (
+        (ldap_tls_ca_file_stat.stat.exists | default(false))
+        and (ldap_tls_ca_file not in (ldap_tls_config_check.stdout | default('')))
+      )
+      or (
+        not (ldap_tls_ca_file_stat.stat.exists | default(false))
+        and ('olcTLSCACertificateFile:' in (ldap_tls_config_check.stdout | default('')))
+      )
+    )

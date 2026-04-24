@@ -127,7 +127,7 @@ fi
 
 LDAP_URLS="ldap://0.0.0.0:${LDAP_INTERNAL_LDAP_PORT}/ ldapi:///"
 if [ "${LDAP_ENABLE_LDAPS}" = "true" ]; then
-    if [ -r "${LDAP_TLS_CERT_FILE}" ] && [ -r "${LDAP_TLS_KEY_FILE}" ] && [ -r "${LDAP_TLS_CA_FILE}" ]; then
+    if [ -r "${LDAP_TLS_CERT_FILE}" ] && [ -r "${LDAP_TLS_KEY_FILE}" ]; then
         LDAP_URLS="${LDAP_URLS} ldaps://0.0.0.0:${LDAP_INTERNAL_LDAPS_PORT}/"
     else
         echo "LDAPS requested, but TLS material is incomplete. Continuing without ldaps:// listener." >&2
