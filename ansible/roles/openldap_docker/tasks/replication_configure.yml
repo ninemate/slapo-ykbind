@@ -131,11 +131,13 @@
     ldap_replication_current_multiprovider_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcMultiProvider: ') | map('regex_replace', '^olcMultiProvider: ', '') | list }}"
     ldap_replication_current_access_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | list }}"
     ldap_replication_current_limits_values: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | list }}"
+    ldap_replication_current_access_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
+    ldap_replication_current_limits_values_normalized: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | map('regex_replace', '^\\{[0-9]+\\}', '') | list }}"
     ldap_replication_syncprov_dn: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^dn: ') | map('regex_replace', '^dn: ', '') | list | first | default('') }}"
     ldap_replication_syncprov_checkpoint_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpCheckpoint: ') | map('regex_replace', '^olcSpCheckpoint: ', '') | list }}"
     ldap_replication_syncprov_sessionlog_values: "{{ ldap_replication_syncprov_state.stdout_lines | select('match', '^olcSpSessionlog: ') | map('regex_replace', '^olcSpSessionlog: ', '') | list }}"
-    ldap_replication_access_rule_matches: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcAccess: ') | map('regex_replace', '^olcAccess: ', '') | select('search', ldap_replication_access_rule_pattern) | list }}"
-    ldap_replication_limits_rule_matches: "{{ ldap_replication_db_state.stdout_lines | select('match', '^olcLimits: ') | map('regex_replace', '^olcLimits: ', '') | select('match', ldap_replication_limits_rule_pattern) | list }}"
+    ldap_replication_access_rule_matches: "{{ ldap_replication_current_access_values | select('search', ldap_replication_access_rule_pattern) | list }}"
+    ldap_replication_limits_rule_matches: "{{ ldap_replication_current_limits_values | select('match', '^(\\{[0-9]+\\})?' ~ ldap_replication_limits_rule_pattern | regex_replace('^\\^', '')) | list }}"
 
 - name: Store replication reconciliation decisions
   ansible.builtin.set_fact:
@@ -177,8 +179,8 @@
           or (ldap_replication_syncprov_sessionlog_values != [ldap_replication_syncprov_sessionlog | string])
         )
       }}
-    ldap_replication_access_rule_present: "{{ ldap_replication_access_rule_matches | length > 0 }}"
-    ldap_replication_limits_rule_present: "{{ ldap_replication_limits_rule_matches | length > 0 }}"
+    ldap_replication_access_rule_present: "{{ (ldap_replication_current_access_values_normalized | select('search', ldap_replication_access_rule_pattern) | list | length) > 0 }}"
+    ldap_replication_limits_rule_present: "{{ (ldap_replication_current_limits_values_normalized | select('match', ldap_replication_limits_rule_pattern) | list | length) > 0 }}"
 
 - name: Render syncprov module load LDIF
   ansible.builtin.template:
