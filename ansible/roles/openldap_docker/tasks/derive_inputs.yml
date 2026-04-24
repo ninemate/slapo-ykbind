@@ -111,6 +111,27 @@
     radius_container_healthcheck_ldap_uri_effective: >-
       {{ radius_ldap_uri_scheme_effective ~ '://' ~ radius_ldap_host_effective ~ ':' ~ (radius_ldap_port_effective | string) }}
 
+- name: Set effective TLS source paths
+  ansible.builtin.set_fact:
+    ldap_tls_certificate_src_path_effective: >-
+      {{ ldap_tls_certificate_src
+         if (ldap_tls_certificate_src | length > 0 and ldap_tls_certificate_src.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_tls_certificate_src)
+         if (ldap_tls_certificate_src | length > 0)
+         else ((lookup('ansible.builtin.fileglob', repo_root ~ '/tls/' ~ (ldap_tls_cert_file | basename), wantlist=True) | first) | default('')) }}
+    ldap_tls_private_key_src_path_effective: >-
+      {{ ldap_tls_private_key_src
+         if (ldap_tls_private_key_src | length > 0 and ldap_tls_private_key_src.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_tls_private_key_src)
+         if (ldap_tls_private_key_src | length > 0)
+         else ((lookup('ansible.builtin.fileglob', repo_root ~ '/tls/' ~ (ldap_tls_key_file | basename), wantlist=True) | first) | default('')) }}
+    ldap_tls_ca_src_path_effective: >-
+      {{ ldap_tls_ca_src
+         if (ldap_tls_ca_src | length > 0 and ldap_tls_ca_src.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_tls_ca_src)
+         if (ldap_tls_ca_src | length > 0)
+         else ((lookup('ansible.builtin.fileglob', repo_root ~ '/tls/' ~ (ldap_tls_ca_file | basename), wantlist=True) | first) | default('')) }}
+
 - name: Set derived RADIUS main config path fact
   ansible.builtin.set_fact:
     radius_main_config_src_path: >-

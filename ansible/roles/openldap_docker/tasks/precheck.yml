@@ -149,6 +149,18 @@
       and ldap_firewall_service_allowed_cidrs values. The defaults are intentionally empty.
   when: ldap_manage_host_firewall | bool
 
+- name: Validate required TLS source inputs for LDAPS
+  ansible.builtin.assert:
+    that:
+      - ldap_tls_certificate_src_path_effective | length > 0
+      - ldap_tls_private_key_src_path_effective | length > 0
+    fail_msg: >-
+      ldap_enable_ldaps=true, but no certificate/key source could be resolved.
+      Set ldap_tls_certificate_src and ldap_tls_private_key_src explicitly, or place files in
+      repo tls/ named {{ ldap_tls_cert_file | basename }} and {{ ldap_tls_key_file | basename }}.
+      Optional CA fallback path is {{ ldap_tls_ca_file | basename }}.
+  when: ldap_enable_ldaps | bool
+
 - name: Require existing cn=config directory for adopt_existing mode
   ansible.builtin.assert:
     that:
