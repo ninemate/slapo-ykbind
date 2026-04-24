@@ -10,6 +10,23 @@
   register: radius_full_config_copy
   when: radius_use_full_config_tree | bool
 
+- name: Inspect host radiusd.conf path state
+  ansible.builtin.stat:
+    path: "{{ radius_config_dir }}/radiusd.conf"
+  register: radius_radiusd_conf_path_stat
+  when:
+    - radius_mount_radiusd_conf | bool
+    - not (radius_use_full_config_tree | bool)
+
+- name: Remove stale radiusd.conf directory on target host
+  ansible.builtin.file:
+    path: "{{ radius_config_dir }}/radiusd.conf"
+    state: absent
+  when:
+    - radius_mount_radiusd_conf | bool
+    - not (radius_use_full_config_tree | bool)
+    - radius_radiusd_conf_path_stat.stat.isdir | default(false)
+
 - name: Copy external radiusd.conf to target host
   ansible.builtin.copy:
     src: "{{ radius_radiusd_conf_src_path }}"
@@ -83,6 +100,18 @@
     - radius_mount_ldap_module | bool
     - radius_mods_available_ldap_src_path | length == 0
 
+- name: Copy managed LDAP module config into mods-enabled on target host
+  ansible.builtin.copy:
+    src: "{{ radius_config_dir }}/mods-available/ldap"
+    dest: "{{ radius_config_dir }}/mods-enabled/ldap"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+    remote_src: true
+  register: radius_ldap_module_enabled_copy
+  when:
+    - radius_mount_ldap_module | bool
+
 - name: Render managed dynamic_clients module config to target host
   ansible.builtin.template:
     src: freeradius-dynamic-clients-module.j2
@@ -91,6 +120,19 @@
     group: "{{ radius_runtime_gid | string }}"
     mode: "0644"
   register: radius_dynamic_clients_module_template
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - radius_dynamic_client_networks | length > 0
+
+- name: Copy managed dynamic_clients module config into mods-enabled on target host
+  ansible.builtin.copy:
+    src: "{{ radius_dynamic_clients_module_host_path }}"
+    dest: "{{ radius_config_dir }}/mods-enabled/dynamic_clients"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+    remote_src: true
+  register: radius_dynamic_clients_module_enabled_copy
   when:
     - not (radius_use_full_config_tree | bool)
     - radius_dynamic_client_networks | length > 0
@@ -154,7 +196,9 @@
         or (radius_clients_conf_template.changed | default(false))
         or (radius_ldap_module_copy.changed | default(false))
         or (radius_ldap_module_template.changed | default(false))
+        or (radius_ldap_module_enabled_copy.changed | default(false))
         or (radius_dynamic_clients_module_template.changed | default(false))
+        or (radius_dynamic_clients_module_enabled_copy.changed | default(false))
         or (radius_default_site_copy.changed | default(false))
         or (radius_default_site_template.changed | default(false))
         or (radius_inner_tunnel_site_copy.changed | default(false))

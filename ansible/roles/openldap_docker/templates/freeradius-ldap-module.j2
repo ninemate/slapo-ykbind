@@ -1,9 +1,9 @@
 ldap {
-  server = {{ radius_ldap_host | quote }}
+  server = "{{ radius_ldap_host | replace('\\', '\\\\') | replace('"', '\\"') }}"
   port = {{ radius_ldap_port }}
-  identity = {{ radius_ldap_bind_dn | quote }}
-  password = {{ radius_ldap_bind_password | quote }}
-  base_dn = {{ radius_ldap_base_dn | quote }}
+  identity = "{{ radius_ldap_bind_dn | replace('\\', '\\\\') | replace('"', '\\"') }}"
+  password = "{{ radius_ldap_bind_password | replace('\\', '\\\\') | replace('"', '\\"') }}"
+  base_dn = "{{ radius_ldap_base_dn | replace('\\', '\\\\') | replace('"', '\\"') }}"
 
   update {
     control:Password-With-Header += 'userPassword'
@@ -30,20 +30,20 @@ ldap {
   }
 
   group {
-    base_dn = {{ radius_ldap_group_base_dn | quote }}
-    filter = {{ radius_ldap_group_filter | quote }}
-    membership_attribute = {{ radius_ldap_group_membership_attribute | quote }}
+    base_dn = "{{ radius_ldap_group_base_dn | replace('\\', '\\\\') | replace('"', '\\"') }}"
+    filter = "{{ radius_ldap_group_filter | replace('\\', '\\\\') | replace('"', '\\"') }}"
+    membership_attribute = "{{ radius_ldap_group_membership_attribute | replace('\\', '\\\\') | replace('"', '\\"') }}"
   }
 
   profile {
   }
 
   client {
-    base_dn = {{ radius_clients_base_dn | quote }}
-    filter = {{ radius_ldap_client_filter | quote }}
+    base_dn = "{{ radius_clients_base_dn | replace('\\', '\\\\') | replace('"', '\\"') }}"
+    filter = "{{ radius_ldap_client_filter | replace('\\', '\\\\') | replace('"', '\\"') }}"
     attribute {
-      identifier = {{ radius_ldap_client_identifier_attribute | quote }}
-      secret = {{ radius_ldap_client_secret_attribute | quote }}
+      identifier = "{{ radius_ldap_client_identifier_attribute | replace('\\', '\\\\') | replace('"', '\\"') }}"
+      secret = "{{ radius_ldap_client_secret_attribute | replace('\\', '\\\\') | replace('"', '\\"') }}"
     }
   }
 
@@ -98,6 +98,6 @@ ldap {
 
   tls {
     start_tls = {{ (radius_ldap_start_tls | bool) | ternary('yes', 'no') }}
-    require_cert = {{ radius_ldap_tls_require_cert | quote }}
+    require_cert = "{{ radius_ldap_tls_require_cert | replace('\\', '\\\\') | replace('"', '\\"') }}"
   }
 }

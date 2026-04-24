@@ -101,11 +101,11 @@ services:
 {%   endif %}
 {%   if radius_mount_ldap_module %}
       - "{{ radius_config_dir }}/mods-available/ldap:{{ radius_container_config_dir }}/mods-available/ldap:ro"
-      - "{{ radius_config_dir }}/mods-available/ldap:{{ radius_container_config_dir }}/mods-enabled/ldap:ro"
+      - "{{ radius_config_dir }}/mods-enabled/ldap:{{ radius_container_config_dir }}/mods-enabled/ldap:ro"
 {%   endif %}
 {%   if radius_dynamic_client_networks | length > 0 %}
       - "{{ radius_dynamic_clients_module_host_path }}:{{ radius_container_config_dir }}/mods-available/dynamic_clients:ro"
-      - "{{ radius_dynamic_clients_module_host_path }}:{{ radius_container_config_dir }}/mods-enabled/dynamic_clients:ro"
+      - "{{ radius_config_dir }}/mods-enabled/dynamic_clients:{{ radius_container_config_dir }}/mods-enabled/dynamic_clients:ro"
 {%   endif %}
 {%   if radius_mount_default_site %}
       - "{{ radius_config_dir }}/sites-enabled/default:{{ radius_container_config_dir }}/sites-enabled/default:ro"
