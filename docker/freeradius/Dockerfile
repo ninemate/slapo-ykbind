@@ -57,6 +57,10 @@ RUN set -eux; \
       /etc/freeradius/3.0 \
       /var/log/freeradius \
       /var/run/freeradius; \
+    sed -ri \
+      -e 's@^([[:space:]]*user[[:space:]]*=[[:space:]]*).*$@\1'"${RADIUS_RUNTIME_USER}"'@' \
+      -e 's@^([[:space:]]*group[[:space:]]*=[[:space:]]*).*$@\1'"${RADIUS_RUNTIME_GROUP}"'@' \
+      /etc/freeradius/3.0/radiusd.conf; \
     chmod +x /entrypoint.sh /healthcheck.sh
 
 EXPOSE 1812/udp 1813/udp

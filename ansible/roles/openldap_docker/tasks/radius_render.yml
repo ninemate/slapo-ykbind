@@ -18,7 +18,21 @@
     group: "{{ radius_runtime_gid | string }}"
     mode: "0644"
   register: radius_radiusd_conf_copy
-  when: radius_mount_radiusd_conf | bool
+  when:
+    - radius_mount_radiusd_conf | bool
+    - radius_radiusd_conf_src_path | length > 0
+
+- name: Render managed radiusd.conf to target host
+  ansible.builtin.template:
+    src: freeradius-radiusd.conf.j2
+    dest: "{{ radius_config_dir }}/radiusd.conf"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_radiusd_conf_template
+  when:
+    - radius_mount_radiusd_conf | bool
+    - radius_radiusd_conf_src_path | length == 0
 
 - name: Copy external clients.conf to target host
   ansible.builtin.copy:
@@ -135,6 +149,7 @@
       {{
         (radius_full_config_copy.changed | default(false))
         or (radius_radiusd_conf_copy.changed | default(false))
+        or (radius_radiusd_conf_template.changed | default(false))
         or (radius_clients_conf_copy.changed | default(false))
         or (radius_clients_conf_template.changed | default(false))
         or (radius_ldap_module_copy.changed | default(false))
