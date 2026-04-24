@@ -81,18 +81,6 @@
     - not (radius_use_full_config_tree | bool)
     - radius_dynamic_client_networks | length > 0
 
-- name: Ensure LDAP module is enabled in the host override tree
-  ansible.builtin.file:
-    src: "../mods-available/ldap"
-    dest: "{{ radius_config_dir }}/mods-enabled/ldap"
-    state: link
-    owner: "{{ radius_runtime_uid | string }}"
-    group: "{{ radius_runtime_gid | string }}"
-  register: radius_ldap_module_symlink
-  when:
-    - radius_mount_ldap_module | bool
-    - not (radius_use_full_config_tree | bool)
-
 - name: Copy external default site config to target host
   ansible.builtin.copy:
     src: "{{ radius_sites_available_default_src_path }}"
@@ -151,7 +139,6 @@
         or (radius_clients_conf_template.changed | default(false))
         or (radius_ldap_module_copy.changed | default(false))
         or (radius_ldap_module_template.changed | default(false))
-        or (radius_ldap_module_symlink.changed | default(false))
         or (radius_dynamic_clients_module_template.changed | default(false))
         or (radius_default_site_copy.changed | default(false))
         or (radius_default_site_template.changed | default(false))
