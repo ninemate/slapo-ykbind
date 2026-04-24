@@ -22,7 +22,11 @@ ldap {
 
   user {
     base_dn = "${..base_dn}"
+{% if radius_ldap_user_filter | length > 0 %}
     filter = {{ radius_ldap_user_filter | quote }}
+{% else %}
+    filter = "({{ radius_ldap_user_name_attribute }}={% raw %}%{%{Stripped-User-Name}:-%{User-Name}}{% endraw %})"
+{% endif %}
   }
 
   group {
