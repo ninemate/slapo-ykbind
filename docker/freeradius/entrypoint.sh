@@ -5,6 +5,7 @@ RADIUS_CONFIG_DIR="${RADIUS_CONFIG_DIR:-/etc/freeradius/3.0}"
 RADIUS_LOG_DIR="${RADIUS_LOG_DIR:-/var/log/freeradius}"
 RADIUS_RUN_DIR="${RADIUS_RUN_DIR:-/var/run/freeradius}"
 RADIUS_MAIN_CONFIG_FILE="${RADIUS_MAIN_CONFIG_FILE:-$RADIUS_CONFIG_DIR/radiusd.conf}"
+RADIUS_DAEMON_FLAGS="${RADIUS_DAEMON_FLAGS:--X}"
 
 for required_dir in "$RADIUS_CONFIG_DIR" "$RADIUS_LOG_DIR" "$RADIUS_RUN_DIR"; do
     if [ ! -d "$required_dir" ]; then
@@ -23,4 +24,5 @@ if [ "$#" -gt 0 ]; then
 fi
 
 freeradius -CX -d "$RADIUS_CONFIG_DIR"
-exec freeradius -f -d "$RADIUS_CONFIG_DIR" -l stdout
+set -- freeradius $RADIUS_DAEMON_FLAGS -d "$RADIUS_CONFIG_DIR"
+exec "$@"

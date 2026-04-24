@@ -24,14 +24,14 @@ max_requests = 16384
 hostname_lookups = no
 
 log {
-  destination = files
+  destination = {{ radius_log_destination }}
   colourise = yes
   file = ${logdir}/radius.log
   syslog_facility = daemon
   stripped_names = no
-  auth = no
-  auth_badpass = no
-  auth_goodpass = no
+  auth = {{ (radius_log_auth_requests | bool) | ternary('yes', 'no') }}
+  auth_badpass = {{ (radius_log_auth_badpass | bool) | ternary('yes', 'no') }}
+  auth_goodpass = {{ (radius_log_auth_goodpass | bool) | ternary('yes', 'no') }}
   msg_denied = "You are already logged in - access denied"
 }
 

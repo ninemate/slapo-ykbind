@@ -144,6 +144,11 @@ radius_sites_available_default: ""
 radius_sites_available_inner_tunnel: ""
 radius_clients: []
 radius_manage_radiusd_conf: true
+radius_daemon_flags: -X
+radius_log_destination: stdout
+radius_log_auth_requests: true
+radius_log_auth_badpass: false
+radius_log_auth_goodpass: false
 radius_test_username: ""
 radius_test_password_otp: ""
 radius_dynamic_clients_module_host_path: "{{ radius_config_dir }}/mods-available/dynamic_clients"
