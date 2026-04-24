@@ -6,11 +6,11 @@ ARG LDAP_RUNTIME_GID=11050
 
 FROM ${BASE_IMAGE} AS builder
 
-ARG http_proxy=http://proxy.example.net:3128
-ARG https_proxy=http://proxy.example.net:3128
+ARG http_proxy
+ARG https_proxy
 ARG no_proxy=localhost,127.0.0.1
-ARG HTTP_PROXY=http://proxy.example.net:3128
-ARG HTTPS_PROXY=http://proxy.example.net:3128
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
 ARG NO_PROXY=localhost,127.0.0.1
 ARG LDAP_MODULE_BUILD_ENABLED=true
 
@@ -72,11 +72,11 @@ RUN set -eux; \
 
 FROM ${BASE_IMAGE}
 
-ARG http_proxy=http://proxy.example.net:3128
-ARG https_proxy=http://proxy.example.net:3128
+ARG http_proxy
+ARG https_proxy
 ARG no_proxy=localhost,127.0.0.1
-ARG HTTP_PROXY=http://proxy.example.net:3128
-ARG HTTPS_PROXY=http://proxy.example.net:3128
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
 ARG NO_PROXY=localhost,127.0.0.1
 ARG LDAP_RUNTIME_USER=ldap-runtime
 ARG LDAP_RUNTIME_GROUP=ldap-runtime

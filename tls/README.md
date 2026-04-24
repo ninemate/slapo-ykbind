@@ -1,15 +1,15 @@
-Ide teheted az LDAPS-hez használt tanúsítványfájlokat.
+Place LDAPS certificate files in this directory.
 
-Ajánlott fájlnevek:
+Recommended filenames:
 
 - `tls.crt`
 - `tls.key`
 - `ca.crt`
 
-Példa futtatás:
+Example run:
 
 ```bash
-cd /home/username/Documents/yubik/ansible
+cd ansible
 ansible-playbook playbooks/deploy-openldap.yml \
   -e ldap_admin_password='<set-admin-password>' \
   -e ldap_enable_ldaps=true \

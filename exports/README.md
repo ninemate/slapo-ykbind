@@ -1,26 +1,25 @@
-Ide teheted a deploy során felhasználni kívánt LDIF exportokat.
+Place LDIF exports used during migration in this directory.
 
-Tipikus fájlok:
+Typical files:
 
 - `full-tree.ldif`
 - `full-tree.filtered.ldif`
 - `source-cn-config.reference.ldif`
 - `migration-config.ldif`
 
-Full import példa:
+Full import example:
 
 ```bash
-cd /home/username/Documents/yubik/ansible
+cd ansible
 ansible-playbook playbooks/deploy-openldap.yml \
   -e ldap_deploy_mode=full_import \
   -e ldap_admin_password='<set-admin-password>' \
   -e ldap_ldif_import_file=exports/full-tree.ldif
 ```
 
-A role alapból szűri az `ou=dns,{{ ldap_base_dn }}` subtreet, mert a cél image nem tartalmazza a régi DNS backend támogatást. Kézi szűréshez:
+The role filters the `ou=dns,{{ ldap_base_dn }}` subtree by default because the target image does not include the legacy DNS backend. Manual filtering example:
 
 ```bash
-cd /home/username/Documents/yubik
 tools/filter-unsupported-ldif.sh \
   --drop-subtree "ou=dns,dc=example,dc=org" \
   --output exports/full-tree.filtered.ldif \

@@ -44,8 +44,8 @@ ldap_listen_port: 389
 ldap_ldaps_port: 636
 ldap_ports: []
 
-ldap_http_proxy: http://proxy.example.net:3128
-ldap_https_proxy: http://proxy.example.net:3128
+ldap_http_proxy: ""
+ldap_https_proxy: ""
 ldap_no_proxy: localhost,127.0.0.1
 ldap_proxy_env:
   http_proxy: "{{ ldap_http_proxy }}"
