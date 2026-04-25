@@ -50,3 +50,8 @@ ansible-playbook playbooks/deploy-openldap.yml \
   -e radius_clients_base_dn='ou=radius_clients,dc=example,dc=org' \
   -e '{"radius_dynamic_client_networks":[{"name":"dynamic-a","ipaddr":"192.0.2.0","netmask":24},{"name":"dynamic-b","ipaddr":"198.51.100.0","netmask":24},{"name":"dynamic-ma","ipaddr":"203.0.113.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-wide","ipaddr":"198.18.0.0","netmask":15,"require_message_authenticator":"no"}]}'
 ```
+
+Offline promotion note:
+
+- the FreeRADIUS image can be promoted the same way as OpenLDAP via `docker save` tar archives
+- see [tools/create-release-bundle.sh](../tools/create-release-bundle.sh) and the offline bundle section in [README.md](../README.md)

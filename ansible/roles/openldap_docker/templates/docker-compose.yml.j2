@@ -58,6 +58,11 @@ services:
 {% if ldap_enable_ldaps %}
       - "{{ ldap_tls_host_dir }}:{{ ldap_container_tls_dir }}:ro"
 {% endif %}
+    networks:
+      default:
+        aliases:
+          - openldap
+          - {{ ldap_container_name | quote }}
 {% if radius_enabled %}
 
   radius:
@@ -118,3 +123,6 @@ services:
       - "{{ radius_log_dir }}:{{ radius_container_log_dir }}"
       - "{{ radius_run_dir }}:{{ radius_container_run_dir }}"
 {% endif %}
+
+networks:
+  default: {}

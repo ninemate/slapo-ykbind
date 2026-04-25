@@ -44,6 +44,54 @@ Running [ansible/playbooks/deploy-openldap.yml](ansible/playbooks/deploy-openlda
 - performs mode-specific initialization, adoption, or maintenance actions
 - runs smoke checks against the resulting service
 
+## Offline Promotion Bundle
+
+For production environments without proxy or registry access, the simplest workflow is:
+
+1. build both images on a connected build host
+2. export them as tar archives
+3. transfer the complete repository plus the tar archives to the offline control node
+4. run the same playbook there with local build/save disabled
+
+This repository includes a helper:
+
+- [tools/create-release-bundle.sh](tools/create-release-bundle.sh)
+
+Example on the connected build host:
+
+```bash
+./tools/create-release-bundle.sh
+```
+
+This creates:
+
+- `release-bundle/repo/`
+- `release-bundle/images/openldap-ykbind_latest.tar`
+- `release-bundle/images/freeradius-ldap_latest.tar`
+- `release-bundle/DEPLOY.txt`
+
+Typical offline deploy from the transferred bundle:
+
+```bash
+cd release-bundle/repo/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e @../vars/prod-node1.yml \
+  -e ldap_skip_local_build=true \
+  -e ldap_skip_local_save=true \
+  -e radius_skip_local_build=true \
+  -e radius_skip_local_save=true \
+  -e ldap_local_image_archive="$PWD/../images/openldap-ykbind_latest.tar" \
+  -e radius_local_image_archive="$PWD/../images/freeradius-ldap_latest.tar" \
+  -Kk
+```
+
+For repeatable releases, prefer versioned image tags instead of `latest`, for example:
+
+```yaml
+ldap_image_name: openldap-ykbind:2026-04-25
+radius_image_name: freeradius-ldap:2026-04-25
+```
+
 ## Requirements
 
 Control node:
