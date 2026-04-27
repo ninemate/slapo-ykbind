@@ -1,66 +1,117 @@
 # OpenLDAP YubiKey OTP Overlay Ansible Deploy
 
-Ez a repository két dolgot ad egyben:
+[Magyar összefoglaló](README.hu.md)
 
-1. egy saját `ykbind` OpenLDAP overlay modult YubiKey OTP ellenőrzéssel
-2. egy teljes, Ansible-alapú, Dockeres deploy megoldást Debian 13 alapú OpenLDAP szerverhez
+This repository contains two deliverables:
 
-A cél a "one click" deploy: egyetlen playbook futtatása a control node-on lokálisan felépíti az image-et, tarballként áttölti az LDAP VM-re, elindítja a konténert, betölti a schema/modul/overlay konfigurációt, felépíti az LDAP tree alapját, opcionálisan importál LDIF-et, majd smoke teszteket futtat.
+1. a custom `ykbind` OpenLDAP overlay module for YubiKey OTP validation
+2. an Ansible-based Docker deployment stack for OpenLDAP and an optional FreeRADIUS sidecar on Debian-based hosts
 
-## Mit csinál a playbook
+The deployment supports three explicit modes:
 
-Az [ansible/playbooks/deploy-openldap.yml](/home/username/Documents/yubik/ansible/playbooks/deploy-openldap.yml) futtatása:
+- `full_import`: build a fresh image, bootstrap a clean `cn=config`, then import configuration and directory data
+- `adopt_existing`: rebuild and redeploy the container stack while preserving an existing LDAP database and config state
+- `maintenance`: update an already managed deployment in place without rebuilding the image or reloading the database
 
-- a control node-on létrehozza a Docker build contextet
-- Debian 13 alapú image-et buildel a [docker/openldap/Dockerfile](/home/username/Documents/yubik/docker/openldap/Dockerfile) alapján
-- a meglévő `slapo-ykbind.c` modult multi-stage buildben lefordítja
-- a kész image-et `docker save`-val exportálja
-- átmásolja az image tarballt a cél hostra és `docker load`-dal betölti
-- létrehozza a target hoston a deploy könyvtárakat
-- elindítja a konténert Docker Compose-szal
-- inicializálja a slapd adatbázist az [docker/openldap/entrypoint.sh](/home/username/Documents/yubik/docker/openldap/entrypoint.sh) segítségével
-- betölti a `yubikey-otp` schema-t
-- betölti a `ykbind.so` modult és hozzáadja az overlayt a fő adatbázishoz
-- létrehozza a base DN-t és a szükséges OU-kat
-- opcionálisan bootstrap LDIF-et és teljes tree exportot importál
-- lefuttatja az admin bind és base query smoke teszteket
+The OpenLDAP runtime inside the container is non-root. The image creates a dedicated `ldap-runtime` account and runs `slapd` as `11050:11050` by default. Host-side bind mounts are prepared with matching ownership so deploy, restart, migration, and maintenance flows stay consistent.
 
-## Repository felépítés
+## Repository Layout
 
-- [ansible/](/home/username/Documents/yubik/ansible): inventory, playbook, role, defaults, vars, templates, files
-- [docker/openldap/](/home/username/Documents/yubik/docker/openldap): a konténerhez használt `Dockerfile` és `entrypoint.sh`
-- [schema/](/home/username/Documents/yubik/schema): a saját schema LDIF és schema forrás
-- [examples/](/home/username/Documents/yubik/examples): kézi LDAP példák és korábbi LDIF minták
-- [slapo-ykbind.c](/home/username/Documents/yubik/slapo-ykbind.c): a saját overlay forrása
-- [Makefile](/home/username/Documents/yubik/Makefile): a modul build logikája
+- [ansible/](ansible): playbooks, inventory, role defaults, templates, and files
+- [docker/openldap/](docker/openldap): Docker image build files and entrypoint logic
+- [docker/freeradius/](docker/freeradius): FreeRADIUS image build files and runtime checks
+- [radius/](radius): place existing FreeRADIUS config trees or file overrides here; see [radius/README.md](radius/README.md)
+- [schema/](schema): bundled schema sources and LDIF files
+- [exports/](exports): place exported LDIF files here before migration; see [exports/README.md](exports/README.md)
+- [tls/](tls): place TLS material here before LDAPS deployment; see [tls/README.md](tls/README.md)
+- [tools/filter-unsupported-ldif.sh](tools/filter-unsupported-ldif.sh): helper for removing unsupported subtrees or object classes from export LDIFs
+- [slapo-ykbind.c](slapo-ykbind.c): overlay source code
+- [Makefile](Makefile): overlay build logic
 
-## Előfeltételek
+## What The Playbook Does
+
+Running [ansible/playbooks/deploy-openldap.yml](ansible/playbooks/deploy-openldap.yml):
+
+- builds the OpenLDAP image on the control node
+- compiles the custom `ykbind` module in a multi-stage Docker build
+- exports the image as a tar archive and transfers it to the target host
+- prepares target directories for `data`, `config`, `logs`, `runtime`, and `runtime/tls`
+- aligns host-side ownership with the dedicated runtime UID/GID
+- renders a Docker Compose file and a systemd unit for the managed stack
+- optionally builds and deploys a separate FreeRADIUS container wired to the LDAP service
+- enables and starts the systemd service so the container also comes back after reboot
+- starts the container with root-only bootstrap steps, then runs `slapd` as the dedicated non-root runtime user
+- performs mode-specific initialization, adoption, or maintenance actions
+- runs smoke checks against the resulting service
+
+## Offline Promotion Bundle
+
+For production environments without proxy or registry access, the simplest workflow is:
+
+1. build both images on a connected build host
+2. export them as tar archives
+3. transfer the complete repository plus the tar archives to the offline control node
+4. run the same playbook there with local build/save disabled
+
+This repository includes a helper:
+
+- [tools/create-release-bundle.sh](tools/create-release-bundle.sh)
+
+Example on the connected build host:
+
+```bash
+./tools/create-release-bundle.sh
+```
+
+This creates:
+
+- `release-bundle/repo/`
+- `release-bundle/images/openldap-ykbind_latest.tar`
+- `release-bundle/images/freeradius-ldap_latest.tar`
+- `release-bundle/DEPLOY.txt`
+
+Typical offline deploy from the transferred bundle:
+
+```bash
+cd release-bundle/repo/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e @../vars/prod-node1.yml \
+  -e ldap_skip_local_build=true \
+  -e ldap_skip_local_save=true \
+  -e radius_skip_local_build=true \
+  -e radius_skip_local_save=true \
+  -e ldap_local_image_archive="$PWD/../images/openldap-ykbind_latest.tar" \
+  -e radius_local_image_archive="$PWD/../images/freeradius-ldap_latest.tar" \
+  -Kk
+```
+
+For repeatable releases, prefer versioned image tags instead of `latest`, for example:
+
+```yaml
+ldap_image_name: openldap-ykbind:2026-04-25
+radius_image_name: freeradius-ldap:2026-04-25
+```
+
+## Requirements
 
 Control node:
 
-- Ansible telepítve
-- működő lokális Docker daemon és `docker` CLI
-- SSH elérés a target hostra
-- jog a target hoston `become` használatára
+- Ansible installed
+- a working local Docker daemon and `docker` CLI
+- SSH access to the target host
+- privilege escalation rights on the target host
 
 Target host:
 
-- Debian-alapú rendszer ajánlott
-- internet vagy működő APT proxy
-- Debian 12 vagy Debian 13 disztribúciós `docker.io` és `docker-compose` csomagok
+- Debian-based system recommended
+- Docker packages available either directly or through a reachable package proxy
+- `docker.io` and `docker-compose` packages, unless you manage host packages yourself
 
-Alapértelmezésben a role felteszi a következő host csomagokat Debianon:
+Set `ldap_manage_host_packages=false` if the host already has container tooling installed and managed externally.
 
-- `docker.io`
-- `docker-compose`
+## Inventory
 
-Megjegyzés: a deploy nem igényli a hivatalos Docker upstream repository használatát, a Debian saját csomagjaira épít.
-
-Ha ezt nem szeretnéd, állítsd `false`-ra a `ldap_manage_host_packages` változót.
-
-## Inventory kitöltése
-
-Minta inventory:
+Local example:
 
 ```ini
 [openldap]
@@ -70,7 +121,7 @@ localhost ansible_connection=local
 ansible_become=true
 ```
 
-Távoli host például:
+Remote example:
 
 ```ini
 [openldap]
@@ -80,17 +131,13 @@ ldap-host ansible_host=ldap-host.example.net ansible_user=debian
 ansible_become=true
 ```
 
-Az alap inventory itt van:
+The default inventory is [ansible/inventory/hosts.ini](ansible/inventory/hosts.ini).
 
-- [ansible/inventory/hosts.ini](/home/username/Documents/yubik/ansible/inventory/hosts.ini)
+## Important Variables
 
-## Fontos változók
+Defaults live in [ansible/roles/openldap_docker/defaults/main.yml](ansible/roles/openldap_docker/defaults/main.yml).
 
-Az alapértelmezések itt vannak:
-
-- [ansible/roles/openldap_docker/defaults/main.yml](/home/username/Documents/yubik/ansible/roles/openldap_docker/defaults/main.yml)
-
-Legalább ezeket érdemes átnézni:
+Commonly adjusted values:
 
 ```yaml
 ldap_base_dn: dc=example,dc=org
@@ -102,379 +149,489 @@ ldap_admin_password: changeme
 ldap_container_name: openldap-ykbind
 ldap_image_name: openldap-ykbind:latest
 ldap_container_base_image: debian:trixie
-ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
 
-ldap_http_proxy: http://proxy.example.net:3128
-ldap_https_proxy: http://proxy.example.net:3128
-ldap_no_proxy: localhost,127.0.0.1
-
-ldap_listen_port: 389
-ldap_ldaps_port: 636
-ldap_enable_ldaps: false
-
-ldap_ldif_import_enabled: false
-ldap_ldif_import_file: ""
-ldap_bootstrap_ldif_file: ""
-
-ldap_module_build_enabled: true
-ldap_enable_syslog_ng: false
-ldap_open_files_limit: 1024
+ldap_runtime_user: ldap-runtime
+ldap_runtime_group: ldap-runtime
+ldap_runtime_uid: 11050
+ldap_runtime_gid: 11050
 
 ldap_data_dir: /opt/openldap-ykbind/data
 ldap_config_dir: /opt/openldap-ykbind/config
 ldap_log_dir: /opt/openldap-ykbind/logs
+ldap_tls_host_dir: /opt/openldap-ykbind/runtime/tls
+
+ldap_listen_port: 389
+ldap_ldaps_port: 636
+ldap_container_ldap_port: 1389
+ldap_container_ldaps_port: 1636
+
+ldap_http_proxy: ""
+ldap_https_proxy: ""
+ldap_no_proxy: localhost,127.0.0.1
+
+ldap_deploy_mode: full_import
+ldap_maintenance_restart_container: false
+ldap_manage_host_packages: true
+
+radius_enabled: false
+radius_container_name: freeradius-ldap
+radius_image_name: freeradius-ldap:latest
+radius_config_dir: /opt/openldap-ykbind/radius/config
+radius_auth_port: 1812
+radius_acct_port: 1813
+radius_ldap_host: openldap
+radius_ldap_bind_dn: cn=admin,dc=example,dc=org
+radius_ldap_bind_password: changeme
+radius_ldap_base_dn: dc=example,dc=org
+radius_clients_base_dn: ou=radius_clients,dc=example,dc=org
+
+ldap_mirrormode_enabled: false
+ldap_server_id: ""
+ldap_replication_peer_server_id: ""
+ldap_node_fqdn: ""
+ldap_node_ip: ""
+ldap_peer_fqdn: ""
+ldap_peer_ip: ""
+ldap_replication_bind_dn: cn=mirrormode,dc=example,dc=org
+ldap_replication_bind_password: ""
+ldap_replication_use_ldaps: false
+
+ldap_manage_host_firewall: false
+ldap_firewall_ssh_allowed_cidrs: []
+ldap_firewall_service_allowed_cidrs: []
 ```
 
-További fontos, deploy közben gyakran használt változók:
+Proxy variables are intentionally empty by default. Set them explicitly if your control node needs them for package installation or Docker builds.
 
-- `ldap_base_ous`
-- `ldap_ports`
-- `ldap_container_base_image`
-- `ldap_docker_build_network`
-- `ldap_skip_local_build`
-- `ldap_skip_local_save`
-- `ldap_ldif_import_file`
-- `ldap_force_password_reset`
-- `ldap_force_full_import`
-- `ldap_enable_syslog_ng`
-- `ldap_open_files_limit`
-- `ldap_tls_certificate_src`
-- `ldap_tls_private_key_src`
-- `ldap_tls_ca_src`
-- `ldap_smoke_test_user_dn`
+## Deploy Modes
 
-Felülírási lehetőségek:
+`full_import`
 
-- `ansible/group_vars/all.yml`
-- `ansible/host_vars/<host>.yml`
-- `ansible-playbook -e key=value`
+- builds and transfers an image
+- resets persistent `data` and `config`
+- bootstraps a clean `cn=config`
+- applies schema, module, overlay, and optional config LDIF updates
+- imports the directory tree from LDIF
 
-## One-click deploy futtatás
+`adopt_existing`
 
-Lokális inventoryval:
+- builds and transfers an image
+- preserves existing `data` and `config`
+- starts from the existing bind-mounted LDAP state
+- realigns host-side ownership for the dedicated runtime UID/GID
+- does not run destructive database reset or full-tree import steps
 
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml
+`maintenance`
+
+- does not rebuild the image
+- does not run `docker save` or `docker load`
+- does not reset `data` or `config`
+- does not run a full LDIF restore
+- updates Compose, environment, TLS material, and related runtime settings in place
+- can restart the managed service if `ldap_maintenance_restart_container=true`
+
+## Optional LDAP Mirror Mode
+
+Set `ldap_mirrormode_enabled=true` to have the role configure data-database mirroring between two separately deployed guests. The role keeps this vars-driven so the same playbook can be used in standalone or mirrored mode.
+
+What the role reconciles when mirrormode is enabled:
+
+- `olcServerID` on `cn=config`
+- `syncprov` overlay on the main LDAP database
+- `olcSyncRepl` on the main LDAP database, pointing to the peer guest
+- `olcMultiProvider: TRUE` on the main LDAP database
+- optional replication ACL and unlimited replication search limits for `ldap_replication_bind_dn`
+- `slapadd -w` during `full_import`, plus node-specific `-S <serverID>` when mirrormode is enabled
+
+The role does not replicate `cn=config` itself between nodes. Each guest gets its own runtime config from Ansible, while the main directory database is mirrored over syncrepl.
+
+Standalone behavior:
+
+- with `ldap_mirrormode_enabled=false`, the role removes managed `olcServerID`, `olcSyncRepl`, `olcMultiProvider`, and the managed replication ACL/limits rule so the node can run standalone again
+
+Typical vars for node 1:
+
+```yaml
+ldap_mirrormode_enabled: true
+ldap_server_id: 101
+ldap_replication_peer_server_id: 102
+ldap_node_fqdn: ldap-node-1.example.net
+ldap_node_ip: 192.0.2.10
+ldap_peer_fqdn: ldap-node-2.example.net
+ldap_peer_ip: 192.0.2.11
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: "<mirror-password>"
+ldap_replication_use_ldaps: false
 ```
 
-Példa saját alap DN-nel és admin jelszóval:
+Typical vars for node 2:
 
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_domain=example.org \
-  -e ldap_base_dn=dc=example,dc=org \
-  -e ldap_organization="Example Org" \
-  -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
-  -e ldap_admin_password='<set-admin-password>'
+```yaml
+ldap_mirrormode_enabled: true
+ldap_server_id: 102
+ldap_replication_peer_server_id: 101
+ldap_node_fqdn: ldap-node-2.example.net
+ldap_node_ip: 192.0.2.11
+ldap_peer_fqdn: ldap-node-1.example.net
+ldap_peer_ip: 192.0.2.10
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: "<mirror-password>"
+ldap_replication_use_ldaps: false
 ```
 
-Példa távoli hostra:
+If both nodes have LDAPS configured and certificates matching the guest FQDNs, switch replication to LDAPS with:
 
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml
+```yaml
+ldap_enable_ldaps: true
+ldap_replication_use_ldaps: true
 ```
 
-Ha a local image már biztosan elkészült a control node-on, újrafuttatáskor a build kihagyható:
+## Optional Host Firewall Management
 
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
-  -e ldap_skip_local_build=true
+The deploy playbook can temporarily open the host iptables policies before deployment and then re-apply a restrictive whitelist after the role finishes.
+
+The firewall logic is disabled by default. Enable it only with explicit CIDR lists in your vars file, for example:
+
+```yaml
+ldap_manage_host_firewall: true
+ldap_firewall_ssh_allowed_cidrs:
+  - 198.51.100.0/24
+ldap_firewall_service_allowed_cidrs:
+  - 192.0.2.0/24
+  - 203.0.113.0/24
 ```
 
-Ha a local tarball is már létezik és azt is meg akarod tartani:
+Current managed behavior:
 
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
-  -e ldap_skip_local_build=true \
-  -e ldap_skip_local_save=true
-```
+- pre-task sets `INPUT`, `FORWARD`, and `OUTPUT` policy to `ACCEPT`
+- post-task installs a managed whitelist for:
+  - SSH from `ldap_firewall_ssh_allowed_cidrs`
+  - LDAP and optional LDAPS from `ldap_firewall_service_allowed_cidrs`
+  - RADIUS auth/accounting from `ldap_firewall_service_allowed_cidrs`
+- post-task sets final policy to:
+  - `INPUT DROP`
+  - `FORWARD DROP`
+  - `OUTPUT ACCEPT`
 
-Full migrate megjegyzés:
+The Docker-published service ports are filtered through `DOCKER-USER`, so the service CIDR restrictions also apply to container-published LDAP and RADIUS ports.
 
-- ha `ldap_ldif_import_file` meg van adva, a role ezt full importként kezeli akkor is, ha a külön `ldap_ldif_import_enabled=true` nincs megadva
-- full import módban a role nem hoz létre default base DN-t és default OU-kat
-- ha a `ldap_base_dn` még az alap `dc=example,dc=org` értéken van, a role megpróbálja az import LDIF első `dn:` sorából levezetni
-- ha az admin DN is még alapértéken van, azt `cn=admin,<derived_base_dn>` formára állítja
+## Host Paths And Ownership
 
-## A deploy által létrehozott target oldali könyvtárak
-
-Alapértelmezett root:
+Default deployment root:
 
 ```text
 /opt/openldap-ykbind
 ```
 
-Fontos alkönyvtárak a target hoston:
+Important target-side directories:
 
-- `images/`: a control node-ról átmásolt image tarball
-- `runtime/ldif/`: generált LDIF-ek
-- `runtime/schema/`: schema LDIF-ek
-- `runtime/tls/`: opcionális TLS fájlok
-- `data/`: LDAP adat perzisztencia
-- `config/`: `cn=config` perzisztencia
-- `logs/`: log perzisztencia
+- `images/`: transferred image archive
+- `runtime/ldif/`: generated LDIF files
+- `runtime/schema/`: schema LDIF files
+- `runtime/tls/`: optional TLS files
+- `data/`: persistent LDAP database
+- `config/`: persistent `cn=config`
+- `logs/`: persistent logs
 
-Lokális control node build artifactok alapértelmezett helye:
+Ownership model:
 
-```text
-/tmp/openldap-ykbind-artifacts
-```
+- writable bind mounts are owned by `ldap_runtime_uid:ldap_runtime_gid`
+- default ownership is `11050:11050`
+- Ansible prepares and re-aligns `data`, `config`, `logs`, `runtime/ldif`, `runtime/schema`, `runtime/ldif/imports`, `runtime/ldif/config-imports`, and `runtime/tls`
+- TLS private keys are written as `0600`; certificates and CA files as `0644`
+- inside the container, `slapd` listens on high ports `1389` and optional `1636`; host publishing remains `389` and `636`
 
-Fontos: mivel az image build a control node-on fut, a `ldap_http_proxy`, `ldap_https_proxy` és `ldap_no_proxy` változók a control node nézőpontjából értendők. Ha a proxy csak a guest VM-ből érhető el, de a control node-ról nem, a megakadás a `Build OpenLDAP image on control node` task alatt fog jelentkezni.
+## Systemd-Managed Compose Service
 
-## Full tree export meglévő LDAP-ból
+The Docker Compose stack is managed by a rendered systemd unit instead of ad hoc `docker-compose up` calls.
 
-Ez a rész a teljes adatfára vonatkozik, nem a `cn=config` exportjára.
+- default unit name: `openldap-ykbind-compose.service`
+- default unit path: `/etc/systemd/system/openldap-ykbind-compose.service`
+- enabled automatically by Ansible
+- started automatically after deploy
+- started again automatically after reboot
 
-Példa export parancs meglévő LDAP szerverről:
+The unit uses security hardening compatible with Compose-driven container management, including:
 
-```bash
-ldapsearch -x -LLL -o ldif-wrap=no \
-  -D "cn=admin,dc=example,dc=org" \
-  -W \
-  -H ldap://OLD-LDAP-HOST:389 \
-  -b "dc=example,dc=org" \
-  "(objectClass=*)" > /home/username/Documents/yubik/exports/full-tree.ldif
-```
+- `NoNewPrivileges=yes`
+- `PrivateTmp=yes`
+- `PrivateDevices=yes`
+- `ProtectSystem=full`
+- `ProtectHome=yes`
+- `ProtectKernelTunables=yes`
+- `ProtectKernelModules=yes`
+- `ProtectControlGroups=yes`
+- `ProtectClock=yes`
+- `ProtectHostname=yes`
+- `RestrictSUIDSGID=yes`
+- `LockPersonality=yes`
+- `MemoryDenyWriteExecute=yes`
+- `RestrictRealtime=yes`
+- `SystemCallArchitectures=native`
+- `ReadWritePaths=/opt/openldap-ykbind`
 
-Ha bootstrap LDIF-et is akarsz használni, például külön OU-khoz vagy service entrykhez:
-
-```bash
-ldapsearch -x -LLL -o ldif-wrap=no \
-  -D "cn=admin,dc=example,dc=org" \
-  -W \
-  -H ldap://OLD-LDAP-HOST:389 \
-  -b "ou=People,dc=example,dc=org" \
-  "(objectClass=*)" > /home/username/Documents/yubik/exports/bootstrap.ldif
-```
-
-Az exportált LDIF-et teheted:
-
-- a repositoryban például `exports/full-tree.ldif` vagy `exports/bootstrap.ldif` alá
-- bármely abszolút elérési útra a control node-on
-
-Az Ansible role a relatív útvonalakat a repository gyökeréhez viszonyítva oldja fel.
-
-## Full tree import futtatása
-
-Teljes restore jellegű import:
+Typical host commands:
 
 ```bash
-cd /home/username/Documents/yubik/ansible
+systemctl status openldap-ykbind-compose
+systemctl restart openldap-ykbind-compose
+systemctl stop openldap-ykbind-compose
+systemctl start openldap-ykbind-compose
+journalctl -u openldap-ykbind-compose -f
+```
+
+## Optional RADIUS Container
+
+Set `radius_enabled=true` to deploy a separate FreeRADIUS container in the same Compose stack.
+
+The RADIUS service:
+
+- listens on `1812/udp` and `1813/udp` by default
+- connects to the LDAP container over the Compose network
+- relays PAP authentication to LDAP bind, so the LDAP side decides whether a given user needs `password` or `password+OTP`
+- can use a full existing FreeRADIUS config tree
+- can also run with a smaller override model where Ansible deploys only selected files such as:
+  - `clients.conf`
+  - `mods-available/ldap`
+  - `sites-enabled/default`
+  - `sites-enabled/inner-tunnel`
+
+Supported config models:
+
+- full tree:
+  - set `radius_config_src_dir` to a directory containing an existing FreeRADIUS config tree
+  - that tree is copied to the target host and mounted to `/etc/freeradius/3.0`
+- partial overrides:
+  - set one or more of `radius_radiusd_conf`, `radius_clients_conf`, `radius_mods_available_ldap`, `radius_sites_available_default`, `radius_sites_available_inner_tunnel`
+  - or let Ansible render the LDAP module, dynamic client config, and site configs from variables
+
+Default LDAP wiring for the managed RADIUS templates:
+
+- LDAP host: `radius_ldap_host`
+- LDAP port: `1389`
+- bind DN: `radius_ldap_bind_dn`
+- bind password: `radius_ldap_bind_password`
+- base DN: `radius_ldap_base_dn`
+- user base DN: `radius_ldap_user_base_dn`
+- user filter: `radius_ldap_user_filter`
+- client base DN: `radius_clients_base_dn`
+
+Managed relay behavior:
+
+- FreeRADIUS does not split `password+OTP`
+- PAP credentials are sent to LDAP bind unchanged
+- users with `ykbind` / YubiKey policy enabled in LDAP must authenticate with `password+OTP`
+- users without that LDAP-side policy authenticate with plain password
+- device reply attributes such as `Juniper-Local-User-Name`, `CP-Gaia-User-Role`, `CP-Gaia-SuperUser-Access`, `MBG-Management-Privilege-Level`, `Symbol-Admin-Role`, and `Class` are mapped from LDAP reply attributes
+
+Managed dynamic client behavior:
+
+- define allowed source networks in `radius_dynamic_client_networks`
+- client records are looked up under `radius_clients_base_dn`
+- the lookup key defaults to `cn=%{Packet-Src-IP-Address}`
+- the shared secret defaults to the LDAP attribute `radiusClientSecret`
+- the RADIUS shortname defaults to `radiusClientIdentifier`
+
+The generated FreeRADIUS templates are intentionally small. They are meant as a practical baseline, not as a replacement for a mature site-specific config tree.
+
+If you migrate a full existing `radiusd.conf`, do not keep numeric or distro-specific runtime identity directives such as `user = 11060`, `group = 11060`, `user = freerad`, or `group = freerad`. Either remove those lines or set them to `user = radius-runtime` and `group = radius-runtime` so they match the container runtime account.
+
+## Example Runs
+
+Fresh import:
+
+```bash
+cd ansible
 ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=full_import \
+  -e ldap_domain=example.org \
+  -e ldap_base_dn=dc=example,dc=org \
+  -e ldap_admin_dn="cn=admin,dc=example,dc=org" \
   -e ldap_admin_password='<set-admin-password>' \
-  -e ldap_ldif_import_enabled=true \
   -e ldap_ldif_import_file=exports/full-tree.ldif
 ```
 
-Bootstrap LDIF import:
+Adopt an existing deployment and move it onto the current non-root runtime model:
 
 ```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_admin_password='<set-admin-password>' \
-  -e ldap_bootstrap_ldif_file=exports/bootstrap.ldif
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=adopt_existing \
+  -e ldap_config_dir=/opt/openldap-ykbind/config \
+  -e ldap_data_dir=/opt/openldap-ykbind/data \
+  -e ldap_log_dir=/opt/openldap-ykbind/logs
 ```
 
-Fontos restore megjegyzések:
-
-- a full restore alapból csak üres tree-re ajánlott
-- ha a base DN alatt már vannak child entry-k, a playbook megáll
-- ezt csak akkor írd felül, ha biztosan restore-t akarsz:
+Maintenance update for TLS and runtime settings:
 
 ```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_admin_password='<set-admin-password>' \
-  -e ldap_ldif_import_enabled=true \
-  -e ldap_ldif_import_file=exports/full-tree.ldif \
-  -e ldap_force_full_import=true
-```
-
-Idempotencia megjegyzés:
-
-- alapértelmezésben a bootstrap marker itt jön létre: `/opt/openldap-ykbind/data/.bootstrap-import-done`
-- alapértelmezésben a full import marker itt jön létre: `/opt/openldap-ykbind/data/.full-import-done`
-- ha újra akarod futtatni az importot, a marker törlése mellett a perzisztens LDAP adatot is tisztázni kell
-
-## TLS / LDAPS
-
-Az image nyitja a `389` és `636` portot. A playbook támogatja az LDAPS bekapcsolását, de a tanúsítványkezelést szándékosan egyszerű, bővíthető formában hagyja meg.
-
-Legkényelmesebb használat:
-
-```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_admin_password='<set-admin-password>' \
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=maintenance \
   -e ldap_enable_ldaps=true \
   -e ldap_tls_certificate_src=tls/tls.crt \
   -e ldap_tls_private_key_src=tls/tls.key \
-  -e ldap_tls_ca_src=tls/ca.crt
+  -e ldap_tls_ca_src=tls/ca.crt \
+  -e ldap_maintenance_restart_container=true
 ```
 
-Ekkor a role:
-
-- bemásolja a fájlokat a target host `runtime/tls/` könyvtárába
-- mountolja őket a konténerbe
-- beírja az LDAP TLS útvonalakat a `cn=config` alá
-
-Használt változók:
-
-- `ldap_enable_ldaps`
-- `ldap_ldaps_port`
-- `ldap_tls_certificate_src`
-- `ldap_tls_private_key_src`
-- `ldap_tls_ca_src`
-- `ldap_tls_cert_file`
-- `ldap_tls_key_file`
-- `ldap_tls_ca_file`
-
-## Modul build és deploy működés
-
-Az image build nem csak bemásolja a modult, hanem ténylegesen le is fordítja.
-
-Fő pontok:
-
-- Debian 13 alapú multi-stage Docker build
-- `apt-get build-dep openldap`
-- `apt-get source openldap`
-- a repositoryban lévő [Makefile](/home/username/Documents/yubik/Makefile) fut
-- a lefordított `ykbind.so` a runtime image `/usr/lib/ldap/ykbind.so` helyére kerül
-- a kész image a control node-on tarballként exportálódik
-- a tarball a cél LDAP hostra kerül és ott `docker load` importálja
-- a playbook utána betölti a modult a `cn=module{0},cn=config` alá
-- végül felveszi az overlayt a fő adatbázisra
-
-Ha kézzel akarod debugolni a buildet, a legegyszerűbb a control node-on az Ansible által kirakott build contextet használni:
+Enable the optional RADIUS sidecar with a repo-managed LDAP module and site config:
 
 ```bash
-docker build -t openldap-ykbind:debug /tmp/openldap-ykbind-artifacts/context
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e radius_enabled=true \
+  -e radius_ldap_host=openldap \
+  -e radius_ldap_bind_dn='cn=admin,dc=example,dc=org' \
+  -e radius_ldap_bind_password='<set-admin-password>' \
+  -e radius_ldap_base_dn='dc=example,dc=org' \
+  -e radius_clients_base_dn='ou=radius_clients,dc=example,dc=org' \
+  -e '{"radius_dynamic_client_networks":[{"name":"dynamic-a","ipaddr":"192.0.2.0","netmask":24},{"name":"dynamic-b","ipaddr":"198.51.100.0","netmask":24},{"name":"dynamic-ma","ipaddr":"203.0.113.0","netmask":24,"require_message_authenticator":"true"},{"name":"dynamic-wide","ipaddr":"198.18.0.0","netmask":15,"require_message_authenticator":"no"}]}'
 ```
 
-Deploy oldalon a modul buildje kikapcsolható:
+Deploy with a full existing FreeRADIUS config tree:
 
 ```bash
-cd /home/username/Documents/yubik/ansible
-ansible-playbook playbooks/deploy-openldap.yml \
-  -e ldap_module_build_enabled=false
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e radius_enabled=true \
+  -e radius_config_src_dir=radius/full-config
 ```
 
-Ez hasznos gyors sanity checkhez is: így először a konténer deploy láncot tudod validálni a saját overlay buildje nélkül, majd csak utána kapcsolod vissza a modulfodítást.
-
-## LDAP inicializálás és konfiguráció
-
-A deploy során a role:
-
-- létrehozza a base DN entryt, ha még nem létezik
-- létrehozza a `ldap_base_ous` listában szereplő OU-kat
-- importálja a saját schema LDIF-et
-- opcionálisan további schema LDIF-eket is importál a `ldap_additional_schema_ldifs` listából
-- szükség esetén beállítja a `olcSuffix`, `olcRootDN`, `olcRootPW` értékeket
-- opcionálisan TLS fájlútvonalakat konfigurál a `cn=config` alatt
-
-Megjegyzés: a `slapd` Debianos inicializálása a `ldap_domain` alapján hozza létre az első suffixet. A legtisztább működéshez a `ldap_domain` és `ldap_base_dn` legyen összhangban.
-
-Konténer-specifikus megjegyzés:
-
-- az `invoke-rc.d ... policy-rc.d denied execution of start` üzenet a bootstrap során várható és önmagában nem hiba
-- a `syslog-ng` alapból ki van kapcsolva, mert Dockerben a capability-kezelés fölösleges zajt okoz
-- a `ldap_open_files_limit` alapból `1024`, mert egyes Debian/OpenLDAP konténeres futásoknál a túl magas `nofile` limit `ch_calloc` crash-t okozhat
-
-## Ellenőrzés deploy után
-
-Az Ansible smoke tesztek automatikusan lefutnak, de manuálisan ezek a leghasznosabb parancsok:
-
-Konténer állapot:
+Skip local rebuild when the control node image already exists:
 
 ```bash
-docker-compose -f /opt/openldap-ykbind/docker-compose.yml ps
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_skip_local_build=true
 ```
 
-Admin bind:
+Skip both local build and local save when the image archive is already present:
 
 ```bash
-docker exec openldap-ykbind ldapwhoami \
-  -x -D "cn=admin,dc=example,dc=org" \
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_skip_local_build=true \
+  -e ldap_skip_local_save=true
+```
+
+## Migration Notes
+
+Recommended migration order:
+
+1. prepare portable `cn=config` modifications only
+2. export and import required custom schema LDIFs
+3. import the full tree after filtering unsupported parts
+
+Examples:
+
+```bash
+ldapsearch -x -LLL -o ldif-wrap=no \
+  -D "cn=admin,dc=example,dc=org" \
+  -W \
+  -H ldap://old-ldap-host:389 \
+  -b "dc=example,dc=org" \
+  "(objectClass=*)" > exports/full-tree.ldif
+```
+
+```bash
+ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+  -b "cn=schema,cn=config" \
+  "(objectClass=olcSchemaConfig)" > schema/source-schema.reference.ldif
+```
+
+```bash
+ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+  -b "cn=config" \
+  "(objectClass=*)" > exports/source-cn-config.reference.ldif
+```
+
+Do not import a full `cn=config` dump blindly. Environment-specific items such as module paths, TLS paths, backend modules, numbering, or legacy backend references should be translated into portable `changetype: modify` LDIF operations instead.
+
+Unsupported branches can be filtered with:
+
+```bash
+tools/filter-unsupported-ldif.sh \
+  --drop-subtree "ou=dns,dc=example,dc=org" \
+  --output exports/full-tree.filtered.ldif \
+  exports/full-tree.ldif
+```
+
+## Runtime Path Preparation
+
+The Docker image explicitly prepares runtime directories instead of relying on Debian package side effects. This matters because `slapd slapd/no_configuration boolean true` prevents the package from creating all expected state directories.
+
+The image now creates these paths explicitly:
+
+- `/opt/openldap/bootstrap`
+- `/opt/openldap/bootstrap/ldif`
+- `/opt/openldap/bootstrap/schema`
+- `/etc/ldap/tls`
+- `/etc/ldap/slapd.d`
+- `/run/slapd`
+- `/var/lib/ldap`
+- `/var/log/slapd`
+
+At container start, the entrypoint verifies and re-prepares the writable runtime paths before dropping privileges to the dedicated `ldap-runtime` account.
+
+The optional FreeRADIUS image also runs non-root. It uses a dedicated `radius-runtime` user with default UID/GID `11060:11060`, and Ansible prepares the host-side `radius/config`, `radius/logs`, and `radius/run` directories accordingly.
+
+The Debian `freeradius` package installs its default config tree under `/etc/freeradius/3.0`, but that tree is normally owned by the package's own `freerad` account with group-only read permissions. The image build now normalizes that packaged config tree so the dedicated `radius-runtime` account can read the baseline files and partial override mounts without falling back to the distro-specific service user. The same normalization is applied to the package-provided snakeoil key path under `/etc/ssl/private` so the packaged EAP module can still pass `freeradius -CX` under the non-root runtime.
+
+## RADIUS Testing
+
+After deploy, useful checks are:
+
+```bash
+systemctl status openldap-ykbind-compose
+docker exec freeradius-ldap freeradius -CX -d /etc/freeradius/3.0
+docker exec freeradius-ldap ldapwhoami -x \
+  -D "cn=admin,dc=example,dc=org" \
   -w '<set-admin-password>' \
-  -H ldap://127.0.0.1
+  -H ldap://openldap:1389
 ```
 
-Base query:
+Managed dynamic client config sanity check:
 
 ```bash
-docker exec openldap-ykbind ldapsearch \
-  -x -D "cn=admin,dc=example,dc=org" \
+docker exec freeradius-ldap grep -n 'dynamic_clients_ref' /etc/freeradius/3.0/clients.conf
+docker exec freeradius-ldap grep -n 'ou=radius_clients,dc=example,dc=org' /etc/freeradius/3.0/clients.conf
+```
+
+Relay auth smoke test from inside the container:
+
+```bash
+docker exec freeradius-ldap radtest '<uid>' '<password-or-password+otp>' 127.0.0.1:1812 0 testing123
+```
+
+LDAP-backed client entries are expected under `ou=radius_clients,<base dn>`. With the managed defaults:
+
+- `cn` is matched against the packet source IP
+- `radiusClientSecret` provides the shared secret
+- `radiusClientIdentifier` becomes the FreeRADIUS shortname / NAS identifier hint
+
+Typical LDAP checks:
+
+```bash
+docker exec openldap-ykbind ldapsearch -x -LLL \
+  -D "cn=admin,dc=example,dc=org" \
   -w '<set-admin-password>' \
-  -H ldap://127.0.0.1 \
-  -LLL -b "dc=example,dc=org" -s base "(objectClass=*)" dn
+  -H ldap://127.0.0.1:1389 \
+  -b "ou=radius_clients,dc=example,dc=org" \
+  "(cn=192.0.2.10)" cn radiusClientIdentifier radiusClientSecret
 ```
 
-Schema és overlay jelenlét:
+## YubiKey Overlay Usage
 
-```bash
-docker exec openldap-ykbind ldapsearch \
-  -Q -Y EXTERNAL -H ldapi:/// \
-  -LLL -b cn=schema,cn=config "(cn=yubikey-otp)" dn
+The bundled schema and overlay are intended to be added to existing user entries as auxiliary classes. The exact structural object classes used in your directory are environment-specific, so keep those mappings in your own migration LDIFs or provisioning logic rather than in repo-specific examples.
 
-docker exec openldap-ykbind ldapsearch \
-  -Q -Y EXTERNAL -H ldapi:/// \
-  -LLL -b cn=config "(olcOverlay=ykbind)" dn
-```
+## Sensitive Data Hygiene
 
-## Az overlay működése röviden
+Current documentation intentionally avoids:
 
-A kliens simple bind credentialt küld:
+- exact proxy IP addresses
+- environment-specific hostnames or inventory names
+- personal filesystem paths
+- deployment-area specific object class names
 
-```text
-<password><otp>
-```
-
-Az overlay:
-
-- levágja a végéről a 44 karakteres OTP-t
-- ellenőrzi a modhex és AES ticket adatot
-- ellenőrzi a replay állapotot
-- siker esetén a maradék statikus jelszót adja át a normál OpenLDAP jelszóellenőrzésnek
-- sikeres bind után frissíti a replay mezőket
-
-Fő schema attribútumok:
-
-- `yubiKeyEnabled`
-- `yubiKeyPublicId`
-- `yubiKeyPrivateUid`
-- `yubiKeyAesKey`
-- `yubiKeyLastUseCtr`
-- `yubiKeyLastSessionCtr`
-- `yubiKeyLastTimestamp`
-- `yubiKeyLastCounter`
-
-Kompatibilitási aliasok:
-
-- `YKkeyID`
-- `YKaesKey`
-- `YKkeyCounter`
-- `YKsessionTimestamp`
-
-## Kézi LDAP példák
-
-Megmaradt kézi referenciafájlok:
-
-- [examples/module-load.ldif](/home/username/Documents/yubik/examples/module-load.ldif)
-- [examples/module-path-and-load.ldif](/home/username/Documents/yubik/examples/module-path-and-load.ldif)
-- [examples/overlay-config.ldif](/home/username/Documents/yubik/examples/overlay-config.ldif)
-- [examples/acl-yubikey-secrets.ldif](/home/username/Documents/yubik/examples/acl-yubikey-secrets.ldif)
-
-Ezek főleg debughoz és kézi finomhangoláshoz hasznosak; a normál deploy út az Ansible playbook.
-
-## Ismert korlátok
-
-- a full tree import restore jellegű, nem általános merge mechanizmus
-- a `olcRootPW` idempotens cseréje csak akkor fut le, ha a suffix/rootDN eltér vagy a `ldap_force_password_reset=true`
-- a `ldap_domain` és `ldap_base_dn` eltérése támogatott, de nem ez a Debian `slapd` inicializálás natív útja
-- TLS esetén a tanúsítványanyag meglétét a role ellenőrzi, de a PKI életciklus-kezelést nem automatizálja
+If you need local examples, keep them in untracked operator notes rather than in committed repository files.

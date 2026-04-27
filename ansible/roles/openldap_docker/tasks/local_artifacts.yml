@@ -1,0 +1,9 @@
+---
+- name: Create local artifact root on control node
+  ansible.builtin.file:
+    path: "{{ ldap_local_artifact_root }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  run_once: true

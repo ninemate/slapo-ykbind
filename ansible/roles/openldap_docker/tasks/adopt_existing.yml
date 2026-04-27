@@ -1,0 +1,25 @@
+---
+- name: Discover existing LDAP state in adopt_existing mode
+  ansible.builtin.import_tasks: discover.yml
+
+- name: Auto-derive base DN from existing config when default example DN is still used
+  ansible.builtin.set_fact:
+    ldap_base_dn: "{{ ldap_current_suffix }}"
+  when:
+    - ldap_base_dn == 'dc=example,dc=org'
+    - ldap_current_suffix | length > 0
+
+- name: Auto-derive admin DN from existing config when default example admin DN is still used
+  ansible.builtin.set_fact:
+    ldap_admin_dn: "{{ ldap_current_rootdn }}"
+  when:
+    - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
+    - ldap_current_rootdn | length > 0
+
+- name: Show adopted LDAP state
+  ansible.builtin.debug:
+    msg:
+      - "adopt_existing mode: using mounted cn=config and data directories as-is."
+      - "database_dn={{ ldap_database_config_dn }}"
+      - "suffix={{ ldap_current_suffix }}"
+      - "rootdn={{ ldap_current_rootdn }}"

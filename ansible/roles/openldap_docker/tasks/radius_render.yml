@@ -1,0 +1,245 @@
+---
+- name: Copy full FreeRADIUS config tree to target host
+  ansible.builtin.copy:
+    src: "{{ radius_config_src_path }}/"
+    dest: "{{ radius_config_dir }}/"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+    directory_mode: "0755"
+  register: radius_full_config_copy
+  when: radius_use_full_config_tree | bool
+
+- name: Build list of managed host-side RADIUS file mount paths
+  ansible.builtin.set_fact:
+    radius_managed_file_mount_paths: >-
+      {{
+        [
+          radius_config_dir ~ '/radiusd.conf',
+          radius_config_dir ~ '/clients.conf',
+          radius_config_dir ~ '/mods-available/ldap',
+          radius_config_dir ~ '/mods-enabled/ldap',
+          radius_config_dir ~ '/sites-enabled/default',
+          radius_config_dir ~ '/sites-enabled/inner-tunnel'
+        ]
+        + (
+          [
+            radius_dynamic_clients_module_host_path,
+            radius_config_dir ~ '/mods-enabled/dynamic_clients'
+          ]
+          if (radius_dynamic_client_networks | length > 0)
+          else []
+        )
+      }}
+  when: not (radius_use_full_config_tree | bool)
+
+- name: Inspect managed host-side RADIUS file mount paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ radius_managed_file_mount_paths }}"
+  register: radius_managed_file_mount_path_stats
+  when: not (radius_use_full_config_tree | bool)
+
+- name: Remove stale managed RADIUS mount directories on target host
+  ansible.builtin.file:
+    path: "{{ item.stat.path }}"
+    state: absent
+  loop: "{{ radius_managed_file_mount_path_stats.results | default([]) }}"
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - item.stat.isdir | default(false)
+
+- name: Inspect host radiusd.conf path state
+  ansible.builtin.stat:
+    path: "{{ radius_config_dir }}/radiusd.conf"
+  register: radius_radiusd_conf_path_stat
+  when:
+    - radius_mount_radiusd_conf | bool
+    - not (radius_use_full_config_tree | bool)
+
+- name: Remove stale radiusd.conf directory on target host
+  ansible.builtin.file:
+    path: "{{ radius_config_dir }}/radiusd.conf"
+    state: absent
+  when:
+    - radius_mount_radiusd_conf | bool
+    - not (radius_use_full_config_tree | bool)
+    - radius_radiusd_conf_path_stat.stat.isdir | default(false)
+
+- name: Copy external radiusd.conf to target host
+  ansible.builtin.copy:
+    src: "{{ radius_radiusd_conf_src_path }}"
+    dest: "{{ radius_config_dir }}/radiusd.conf"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_radiusd_conf_copy
+  when:
+    - radius_mount_radiusd_conf | bool
+    - radius_radiusd_conf_src_path | length > 0
+
+- name: Render managed radiusd.conf to target host
+  ansible.builtin.template:
+    src: freeradius-radiusd.conf.j2
+    dest: "{{ radius_config_dir }}/radiusd.conf"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_radiusd_conf_template
+  when:
+    - radius_mount_radiusd_conf | bool
+    - radius_radiusd_conf_src_path | length == 0
+
+- name: Copy external clients.conf to target host
+  ansible.builtin.copy:
+    src: "{{ radius_clients_conf_src_path }}"
+    dest: "{{ radius_config_dir }}/clients.conf"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0640"
+  register: radius_clients_conf_copy
+  when:
+    - radius_mount_clients_conf | bool
+    - radius_clients_conf_src_path | length > 0
+
+- name: Render managed clients.conf to target host
+  ansible.builtin.template:
+    src: radius-clients.conf.j2
+    dest: "{{ radius_config_dir }}/clients.conf"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0640"
+  register: radius_clients_conf_template
+  when:
+    - radius_mount_clients_conf | bool
+    - radius_clients_conf_src_path | length == 0
+    - (radius_clients | length > 0) or (radius_dynamic_client_networks | length > 0)
+
+- name: Copy external LDAP module config to target host
+  ansible.builtin.copy:
+    src: "{{ radius_mods_available_ldap_src_path }}"
+    dest: "{{ radius_config_dir }}/mods-available/ldap"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_ldap_module_copy
+  when:
+    - radius_mount_ldap_module | bool
+    - radius_mods_available_ldap_src_path | length > 0
+
+- name: Render managed LDAP module config to target host
+  ansible.builtin.template:
+    src: freeradius-ldap-module.j2
+    dest: "{{ radius_config_dir }}/mods-available/ldap"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_ldap_module_template
+  when:
+    - radius_mount_ldap_module | bool
+    - radius_mods_available_ldap_src_path | length == 0
+
+- name: Copy managed LDAP module config into mods-enabled on target host
+  ansible.builtin.copy:
+    src: "{{ radius_config_dir }}/mods-available/ldap"
+    dest: "{{ radius_config_dir }}/mods-enabled/ldap"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+    remote_src: true
+  register: radius_ldap_module_enabled_copy
+  when:
+    - radius_mount_ldap_module | bool
+
+- name: Render managed dynamic_clients module config to target host
+  ansible.builtin.template:
+    src: freeradius-dynamic-clients-module.j2
+    dest: "{{ radius_dynamic_clients_module_host_path }}"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_dynamic_clients_module_template
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - radius_dynamic_client_networks | length > 0
+
+- name: Copy managed dynamic_clients module config into mods-enabled on target host
+  ansible.builtin.copy:
+    src: "{{ radius_dynamic_clients_module_host_path }}"
+    dest: "{{ radius_config_dir }}/mods-enabled/dynamic_clients"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+    remote_src: true
+  register: radius_dynamic_clients_module_enabled_copy
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - radius_dynamic_client_networks | length > 0
+
+- name: Copy external default site config to target host
+  ansible.builtin.copy:
+    src: "{{ radius_sites_available_default_src_path }}"
+    dest: "{{ radius_config_dir }}/sites-enabled/default"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_default_site_copy
+  when:
+    - radius_mount_default_site | bool
+    - radius_sites_available_default_src_path | length > 0
+
+- name: Render managed default site config to target host
+  ansible.builtin.template:
+    src: freeradius-site-default.j2
+    dest: "{{ radius_config_dir }}/sites-enabled/default"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_default_site_template
+  when:
+    - radius_mount_default_site | bool
+    - radius_sites_available_default_src_path | length == 0
+
+- name: Copy external inner-tunnel site config to target host
+  ansible.builtin.copy:
+    src: "{{ radius_sites_available_inner_tunnel_src_path }}"
+    dest: "{{ radius_config_dir }}/sites-enabled/inner-tunnel"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_inner_tunnel_site_copy
+  when:
+    - radius_mount_inner_tunnel_site | bool
+    - radius_sites_available_inner_tunnel_src_path | length > 0
+
+- name: Render managed inner-tunnel site config to target host
+  ansible.builtin.template:
+    src: freeradius-site-inner-tunnel.j2
+    dest: "{{ radius_config_dir }}/sites-enabled/inner-tunnel"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_inner_tunnel_site_template
+  when:
+    - radius_mount_inner_tunnel_site | bool
+    - radius_sites_available_inner_tunnel_src_path | length == 0
+
+- name: Store RADIUS config change state
+  ansible.builtin.set_fact:
+    radius_config_changed: >-
+      {{
+        (radius_full_config_copy.changed | default(false))
+        or (radius_radiusd_conf_copy.changed | default(false))
+        or (radius_radiusd_conf_template.changed | default(false))
+        or (radius_clients_conf_copy.changed | default(false))
+        or (radius_clients_conf_template.changed | default(false))
+        or (radius_ldap_module_copy.changed | default(false))
+        or (radius_ldap_module_template.changed | default(false))
+        or (radius_ldap_module_enabled_copy.changed | default(false))
+        or (radius_dynamic_clients_module_template.changed | default(false))
+        or (radius_dynamic_clients_module_enabled_copy.changed | default(false))
+        or (radius_default_site_copy.changed | default(false))
+        or (radius_default_site_template.changed | default(false))
+        or (radius_inner_tunnel_site_copy.changed | default(false))
+        or (radius_inner_tunnel_site_template.changed | default(false))
+      }}

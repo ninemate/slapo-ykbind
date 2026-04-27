@@ -1,0 +1,6 @@
+dn: olcOverlay=syncprov,{{ ldap_database_config_dn }}
+objectClass: olcOverlayConfig
+objectClass: olcSyncProvConfig
+olcOverlay: syncprov
+olcSpCheckpoint: {{ ldap_replication_syncprov_checkpoint_ops }} {{ ldap_replication_syncprov_checkpoint_minutes }}
+olcSpSessionlog: {{ ldap_replication_syncprov_sessionlog }}

@@ -1,11 +1,170 @@
 ---
-- name: Set import mode facts
+- name: Validate LDAP deploy mode
+  ansible.builtin.assert:
+    that:
+      - ldap_deploy_mode in ['full_import', 'adopt_existing', 'maintenance', 'migration']
+    fail_msg: >-
+      ldap_deploy_mode must be one of: full_import, adopt_existing, maintenance.
+      The old migration value is still accepted as an alias for full_import.
+
+- name: Resolve effective deploy mode
   ansible.builtin.set_fact:
-    ldap_full_import_requested: "{{ (ldap_ldif_import_enabled | bool) or (ldap_ldif_import_file | length > 0) }}"
+    ldap_mode: >-
+      {{ 'full_import' if ldap_deploy_mode in ['full_import', 'migration']
+         else ldap_deploy_mode }}
+
+- name: Set mode facts
+  ansible.builtin.set_fact:
+    ldap_full_import_requested: "{{ ldap_mode == 'full_import' }}"
+    ldap_adopt_existing_mode: "{{ ldap_mode == 'adopt_existing' }}"
+    ldap_maintenance_mode: "{{ ldap_mode == 'maintenance' }}"
+    ldap_requires_image_refresh: "{{ ldap_mode != 'maintenance' }}"
+    ldap_manage_runtime_config: "{{ ldap_mode in ['full_import', 'maintenance'] }}"
     ldap_ldif_import_src_path: >-
       {{ ldap_ldif_import_file if (ldap_ldif_import_file | length > 0 and ldap_ldif_import_file.startswith('/'))
          else (repo_root ~ '/' ~ ldap_ldif_import_file) if (ldap_ldif_import_file | length > 0)
          else '' }}
+    ldap_effective_init_mode: "{{ (ldap_mode == 'full_import') | ternary('config-only', 'disabled') }}"
+    ldap_node_fqdn_effective: >-
+      {{ ldap_node_fqdn if (ldap_node_fqdn | length > 0)
+         else ansible_fqdn | default(inventory_hostname) }}
+    ldap_node_ip_effective: >-
+      {{ ldap_node_ip if (ldap_node_ip | length > 0)
+         else ansible_host | default(ansible_default_ipv4.address | default('')) }}
+    radius_requires_image_refresh: "{{ (radius_enabled | bool) and (ldap_mode != 'maintenance') }}"
+    radius_config_src_path: >-
+      {{ radius_config_src_dir if (radius_config_src_dir | length > 0 and radius_config_src_dir.startswith('/'))
+         else (repo_root ~ '/' ~ radius_config_src_dir) if (radius_config_src_dir | length > 0)
+         else '' }}
+    radius_radiusd_conf_src_path: >-
+      {{ radius_radiusd_conf if (radius_radiusd_conf | length > 0 and radius_radiusd_conf.startswith('/'))
+         else (repo_root ~ '/' ~ radius_radiusd_conf) if (radius_radiusd_conf | length > 0)
+         else '' }}
+    radius_clients_conf_src_path: >-
+      {{ radius_clients_conf if (radius_clients_conf | length > 0 and radius_clients_conf.startswith('/'))
+         else (repo_root ~ '/' ~ radius_clients_conf) if (radius_clients_conf | length > 0)
+         else '' }}
+    radius_mods_available_ldap_src_path: >-
+      {{ radius_mods_available_ldap if (radius_mods_available_ldap | length > 0 and radius_mods_available_ldap.startswith('/'))
+         else (repo_root ~ '/' ~ radius_mods_available_ldap) if (radius_mods_available_ldap | length > 0)
+         else '' }}
+    radius_sites_available_default_src_path: >-
+      {{ radius_sites_available_default if (radius_sites_available_default | length > 0 and radius_sites_available_default.startswith('/'))
+         else (repo_root ~ '/' ~ radius_sites_available_default) if (radius_sites_available_default | length > 0)
+         else '' }}
+    radius_sites_available_inner_tunnel_src_path: >-
+      {{ radius_sites_available_inner_tunnel if (radius_sites_available_inner_tunnel | length > 0 and radius_sites_available_inner_tunnel.startswith('/'))
+         else (repo_root ~ '/' ~ radius_sites_available_inner_tunnel) if (radius_sites_available_inner_tunnel | length > 0)
+         else '' }}
+
+- name: Set derived LDAP replication URI facts
+  ansible.builtin.set_fact:
+    ldap_replication_uri_scheme: "{{ (ldap_replication_use_ldaps | bool) | ternary('ldaps', 'ldap') }}"
+    ldap_replication_uri_port: "{{ (ldap_replication_use_ldaps | bool) | ternary(ldap_ldaps_port, ldap_listen_port) }}"
+
+- name: Set derived LDAP replication endpoint facts
+  ansible.builtin.set_fact:
+    ldap_replication_self_uri_effective: >-
+      {{ ldap_replication_self_uri if (ldap_replication_self_uri | length > 0)
+         else (ldap_replication_uri_scheme ~ '://' ~ ldap_node_fqdn_effective ~ ':' ~ (ldap_replication_uri_port | string)) }}
+    ldap_replication_peer_uri_effective: >-
+      {{ ldap_replication_peer_uri if (ldap_replication_peer_uri | length > 0)
+         else (ldap_replication_uri_scheme ~ '://' ~ ((ldap_peer_fqdn if (ldap_peer_fqdn | length > 0) else ldap_peer_ip)) ~ ':' ~ (ldap_replication_uri_port | string)) if ((ldap_peer_fqdn | length > 0) or (ldap_peer_ip | length > 0))
+         else '' }}
+    ldap_replication_rid_effective: >-
+      {{ ldap_replication_rid if (ldap_replication_rid | string | length > 0)
+         else ('%03d' | format((ldap_replication_peer_server_id | int) % 1000)) if (ldap_replication_peer_server_id | string | length > 0)
+         else '' }}
+
+- name: Set effective RADIUS LDAP endpoint selector facts
+  ansible.builtin.set_fact:
+    radius_ldap_host_effective: >-
+      {{ radius_ldap_host
+         if (
+           (radius_ldap_host | string | length > 0)
+           and not (
+             (radius_ldap_host == 'openldap')
+             and (radius_ldap_server | string | length > 0)
+             and (radius_ldap_server != radius_ldap_host)
+           )
+         )
+         else radius_ldap_server }}
+    radius_ldap_use_ldaps_effective: "{{ (radius_ldap_use_ldaps | bool) and not (radius_ldap_start_tls | bool) }}"
+
+- name: Set effective RADIUS LDAP connection facts
+  ansible.builtin.set_fact:
+    radius_ldap_port_effective: >-
+      {{ (radius_ldap_port | int)
+         if (
+           ((radius_ldap_port | string) != (ldap_container_ldap_port | string))
+           or not (radius_ldap_use_ldaps_effective | bool)
+         )
+         else (ldap_container_ldaps_port | int) }}
+    radius_ldap_uri_scheme_effective: "{{ (radius_ldap_use_ldaps_effective | bool) | ternary('ldaps', 'ldap') }}"
+
+- name: Set effective RADIUS LDAP URI facts
+  ansible.builtin.set_fact:
+    radius_dynamic_client_ldap_uri_effective: >-
+      {{ radius_dynamic_client_ldap_uri
+         if (radius_dynamic_client_ldap_uri | string | length > 0)
+         else (radius_ldap_uri_scheme_effective ~ '://' ~ radius_ldap_host_effective ~ ':' ~ (radius_ldap_port_effective | string)) }}
+    radius_container_healthcheck_ldap_uri_effective: >-
+      {{ radius_ldap_uri_scheme_effective ~ '://' ~ radius_ldap_host_effective ~ ':' ~ (radius_ldap_port_effective | string) }}
+
+- name: Set effective TLS source paths
+  ansible.builtin.set_fact:
+    ldap_tls_certificate_src_path_effective: >-
+      {{ ldap_tls_certificate_src
+         if (ldap_tls_certificate_src | length > 0 and ldap_tls_certificate_src.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_tls_certificate_src)
+         if (ldap_tls_certificate_src | length > 0)
+         else ((lookup('ansible.builtin.fileglob', repo_root ~ '/tls/' ~ (ldap_tls_cert_file | basename), wantlist=True) | first) | default('')) }}
+    ldap_tls_private_key_src_path_effective: >-
+      {{ ldap_tls_private_key_src
+         if (ldap_tls_private_key_src | length > 0 and ldap_tls_private_key_src.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_tls_private_key_src)
+         if (ldap_tls_private_key_src | length > 0)
+         else ((lookup('ansible.builtin.fileglob', repo_root ~ '/tls/' ~ (ldap_tls_key_file | basename), wantlist=True) | first) | default('')) }}
+    ldap_tls_ca_src_path_effective: >-
+      {{ ldap_tls_ca_src
+         if (ldap_tls_ca_src | length > 0 and ldap_tls_ca_src.startswith('/'))
+         else (repo_root ~ '/' ~ ldap_tls_ca_src)
+         if (ldap_tls_ca_src | length > 0)
+         else ((lookup('ansible.builtin.fileglob', repo_root ~ '/tls/' ~ (ldap_tls_ca_file | basename), wantlist=True) | first) | default('')) }}
+
+- name: Set derived RADIUS main config path fact
+  ansible.builtin.set_fact:
+    radius_main_config_src_path: >-
+      {{ (radius_config_src_path ~ '/radiusd.conf') if (radius_config_src_path | length > 0)
+         else radius_radiusd_conf_src_path if (radius_radiusd_conf_src_path | length > 0)
+         else '' }}
+
+- name: Set base RADIUS config model facts
+  ansible.builtin.set_fact:
+    radius_use_full_config_tree: "{{ (radius_enabled | bool) and (radius_config_src_path | length > 0) }}"
+
+- name: Set dependent RADIUS config model facts
+  ansible.builtin.set_fact:
+    radius_mount_radiusd_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_radiusd_conf_src_path | length > 0) or (radius_manage_radiusd_conf | bool)) }}"
+    radius_mount_clients_conf: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_clients_conf_src_path | length > 0) or (radius_clients | length > 0) or (radius_dynamic_client_networks | length > 0)) }}"
+    radius_mount_ldap_module: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_mods_available_ldap_src_path | length > 0) or (radius_manage_ldap_module | bool)) }}"
+    radius_mount_default_site: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_sites_available_default_src_path | length > 0) or (radius_manage_default_site | bool)) }}"
+    radius_mount_inner_tunnel_site: "{{ (radius_enabled | bool) and not (radius_use_full_config_tree | bool) and ((radius_sites_available_inner_tunnel_src_path | length > 0) or (radius_manage_inner_tunnel_site | bool)) }}"
+
+- name: Require a full-tree LDIF for full_import mode
+  ansible.builtin.assert:
+    that:
+      - ldap_ldif_import_file | length > 0
+    fail_msg: "ldap_deploy_mode=full_import requires ldap_ldif_import_file."
+  when: ldap_full_import_requested | bool
+
+- name: Reject legacy fresh mode variables that are not part of the supported flows
+  ansible.builtin.assert:
+    that:
+      - ldap_bootstrap_ldif_file | length == 0
+    fail_msg: >-
+      ldap_bootstrap_ldif_file is no longer part of the supported deploy flows.
+      Use ldap_deploy_mode=full_import or ldap_deploy_mode=adopt_existing.
 
 - name: Read first DN from full import LDIF on control node
   ansible.builtin.shell: |
@@ -17,13 +176,13 @@
   delegate_to: localhost
   become: false
   run_once: true
-  when: ldap_full_import_requested and (ldap_ldif_import_src_path | length > 0)
+  when: (ldap_full_import_requested | bool) and (ldap_ldif_import_src_path | length > 0)
 
 - name: Auto-derive base DN from import LDIF when default example DN is still used
   ansible.builtin.set_fact:
     ldap_base_dn: "{{ ldap_first_import_dn_cmd.stdout | trim }}"
   when:
-    - ldap_full_import_requested
+    - ldap_full_import_requested | bool
     - (ldap_first_import_dn_cmd.stdout | default('') | trim | length) > 0
     - ldap_base_dn == 'dc=example,dc=org'
 
@@ -31,6 +190,13 @@
   ansible.builtin.set_fact:
     ldap_admin_dn: "cn=admin,{{ ldap_base_dn }}"
   when:
-    - ldap_full_import_requested
+    - ldap_full_import_requested | bool
     - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
 
+- name: Show RADIUS deploy model
+  ansible.builtin.debug:
+    msg:
+      - "radius enabled={{ radius_enabled | bool }}"
+      - "radius full config tree={{ radius_use_full_config_tree | bool }}"
+      - "radius image refresh required={{ radius_requires_image_refresh | bool }}"
+  when: radius_enabled | bool

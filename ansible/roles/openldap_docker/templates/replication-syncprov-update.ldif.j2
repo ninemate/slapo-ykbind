@@ -1,0 +1,7 @@
+dn: {{ ldap_replication_syncprov_dn }}
+changetype: modify
+replace: olcSpCheckpoint
+olcSpCheckpoint: {{ ldap_replication_syncprov_checkpoint_ops }} {{ ldap_replication_syncprov_checkpoint_minutes }}
+-
+replace: olcSpSessionlog
+olcSpSessionlog: {{ ldap_replication_syncprov_sessionlog }}

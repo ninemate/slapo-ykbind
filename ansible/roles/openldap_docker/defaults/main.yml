@@ -6,6 +6,12 @@ ldap_container_base_image: debian:trixie
 ldap_docker_build_network: host
 ldap_skip_local_build: false
 ldap_skip_local_save: false
+ldap_runtime_user: ldap-runtime
+ldap_runtime_group: ldap-runtime
+ldap_runtime_uid: 11050
+ldap_runtime_gid: 11050
+ldap_container_ldap_port: 1389
+ldap_container_ldaps_port: 1636
 
 ldap_local_artifact_root: /tmp/openldap-ykbind-artifacts
 ldap_local_build_context_dir: "{{ ldap_local_artifact_root }}/context"
@@ -14,12 +20,15 @@ ldap_local_image_archive: "{{ ldap_local_artifact_root }}/{{ ldap_local_image_ar
 ldap_local_build_log: "{{ ldap_local_artifact_root }}/docker-build.log"
 ldap_runtime_dir: "{{ ldap_deploy_root }}/runtime"
 ldap_runtime_ldif_dir: "{{ ldap_runtime_dir }}/ldif"
+ldap_runtime_config_import_dir: "{{ ldap_runtime_ldif_dir }}/config-imports"
 ldap_runtime_schema_dir: "{{ ldap_runtime_dir }}/schema"
 ldap_runtime_import_dir: "{{ ldap_runtime_ldif_dir }}/imports"
 ldap_tls_host_dir: "{{ ldap_runtime_dir }}/tls"
 ldap_remote_image_dir: "{{ ldap_deploy_root }}/images"
 ldap_remote_image_archive: "{{ ldap_remote_image_dir }}/{{ ldap_local_image_archive_name }}"
 ldap_compose_file: "{{ ldap_deploy_root }}/docker-compose.yml"
+ldap_systemd_service_name: "{{ ldap_container_name }}-compose"
+ldap_systemd_unit_file: "/etc/systemd/system/{{ ldap_systemd_service_name }}.service"
 
 ldap_data_dir: "{{ ldap_deploy_root }}/data"
 ldap_config_dir: "{{ ldap_deploy_root }}/config"
@@ -35,8 +44,8 @@ ldap_listen_port: 389
 ldap_ldaps_port: 636
 ldap_ports: []
 
-ldap_http_proxy: http://proxy.example.net:3128
-ldap_https_proxy: http://proxy.example.net:3128
+ldap_http_proxy: ""
+ldap_https_proxy: ""
 ldap_no_proxy: localhost,127.0.0.1
 ldap_proxy_env:
   http_proxy: "{{ ldap_http_proxy }}"
@@ -53,24 +62,17 @@ ldap_enable_ldaps: false
 ldap_force_password_reset: false
 ldap_enable_syslog_ng: false
 ldap_open_files_limit: 1024
-
-ldap_base_object_classes:
-  - top
-  - dcObject
-  - organization
-ldap_base_additional_attributes:
-  o: "{{ ldap_organization }}"
-  description: Managed by Ansible
-ldap_base_ous:
-  - People
-  - Groups
-  - Services
+ldap_deploy_mode: full_import
+ldap_maintenance_restart_container: false
 
 ldap_additional_schema_ldifs: []
+ldap_migration_config_ldifs: []
 ldap_bootstrap_ldif_file: ""
-ldap_ldif_import_enabled: false
 ldap_ldif_import_file: ""
-ldap_force_full_import: false
+ldap_ldif_filter_enabled: true
+ldap_ldif_drop_subtrees:
+  - "ou=dns,{{ ldap_base_dn }}"
+ldap_ldif_drop_objectclasses: []
 
 ldap_tls_certificate_src: ""
 ldap_tls_private_key_src: ""
@@ -80,6 +82,112 @@ ldap_tls_key_file: /etc/ldap/tls/tls.key
 ldap_tls_ca_file: /etc/ldap/tls/ca.crt
 
 ldap_smoke_test_user_dn: ""
+ldap_mirrormode_enabled: false
+ldap_server_id: ""
+ldap_replication_peer_server_id: ""
+ldap_node_fqdn: ""
+ldap_node_ip: ""
+ldap_peer_fqdn: ""
+ldap_peer_ip: ""
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: ""
+ldap_replication_searchbase: "{{ ldap_base_dn }}"
+ldap_replication_use_ldaps: false
+ldap_replication_self_uri: ""
+ldap_replication_peer_uri: ""
+ldap_replication_rid: ""
+ldap_replication_type: refreshAndPersist
+ldap_replication_attrs: "*,+"
+ldap_replication_retry: "60 +"
+ldap_replication_timeout: 1
+ldap_replication_schemachecking: "on"
+ldap_replication_tls_reqcert: demand
+ldap_replication_manage_acl: true
+ldap_replication_manage_limits: true
+ldap_replication_syncprov_checkpoint_ops: 100
+ldap_replication_syncprov_checkpoint_minutes: 10
+ldap_replication_syncprov_sessionlog: 100
+ldap_replication_module_name: syncprov.la
+ldap_manage_host_firewall: false
+ldap_firewall_input_chain: YUBIK-HOST-INPUT
+ldap_firewall_docker_user_chain: YUBIK-DOCKER-USER
+ldap_firewall_ssh_port: 22
+ldap_firewall_ssh_allowed_cidrs: []
+ldap_firewall_service_allowed_cidrs: []
 
-ldap_full_import_marker: "{{ ldap_data_dir }}/.full-import-done"
-ldap_bootstrap_import_marker: "{{ ldap_data_dir }}/.bootstrap-import-done"
+radius_enabled: false
+radius_container_name: freeradius-ldap
+radius_image_name: freeradius-ldap:latest
+radius_container_base_image: debian:trixie
+radius_runtime_user: radius-runtime
+radius_runtime_group: radius-runtime
+radius_runtime_uid: 11060
+radius_runtime_gid: 11060
+radius_skip_local_build: false
+radius_skip_local_save: false
+radius_deploy_root: "{{ ldap_deploy_root }}/radius"
+radius_local_artifact_root: "{{ ldap_local_artifact_root }}/radius"
+radius_local_build_context_dir: "{{ radius_local_artifact_root }}/context"
+radius_local_image_archive_name: "{{ radius_image_name | regex_replace('[:/]', '_') }}.tar"
+radius_local_image_archive: "{{ radius_local_artifact_root }}/{{ radius_local_image_archive_name }}"
+radius_local_build_log: "{{ radius_local_artifact_root }}/docker-build.log"
+radius_remote_image_archive: "{{ ldap_remote_image_dir }}/{{ radius_local_image_archive_name }}"
+radius_config_dir: "{{ radius_deploy_root }}/config"
+radius_log_dir: "{{ radius_deploy_root }}/logs"
+radius_run_dir: "{{ radius_deploy_root }}/run"
+
+radius_config_src_dir: ""
+radius_radiusd_conf: ""
+radius_clients_conf: ""
+radius_mods_available_ldap: ""
+radius_sites_available_default: ""
+radius_sites_available_inner_tunnel: ""
+radius_clients: []
+radius_manage_radiusd_conf: true
+radius_daemon_flags: -X
+radius_log_destination: stdout
+radius_log_auth_requests: true
+radius_log_auth_badpass: false
+radius_log_auth_goodpass: false
+radius_test_username: ""
+radius_test_password_otp: ""
+radius_dynamic_clients_module_host_path: "{{ radius_config_dir }}/mods-available/dynamic_clients"
+
+radius_auth_port: 1812
+radius_acct_port: 1813
+radius_listen_auth_port: "{{ radius_auth_port }}"
+radius_listen_acct_port: "{{ radius_acct_port }}"
+radius_container_auth_port: 1812
+radius_container_acct_port: 1813
+radius_ports: []
+
+radius_ldap_host: openldap
+radius_ldap_server: "{{ radius_ldap_host }}"
+radius_ldap_port: "{{ ldap_container_ldap_port }}"
+radius_ldap_use_ldaps: "{{ ldap_enable_ldaps }}"
+radius_ldap_bind_dn: "{{ ldap_admin_dn }}"
+radius_ldap_bind_password: "{{ ldap_admin_password }}"
+radius_ldap_base_dn: "{{ ldap_base_dn }}"
+radius_ldap_user_base_dn: "{{ ldap_base_dn }}"
+radius_ldap_user_name_attribute: uid
+radius_ldap_user_filter: ""
+radius_ldap_group_base_dn: "{{ ldap_base_dn }}"
+radius_ldap_group_filter: "(objectClass=posixGroup)"
+radius_ldap_group_membership_attribute: memberOf
+radius_ldap_start_tls: false
+radius_ldap_tls_require_cert: allow
+radius_ldap_client_filter: "(objectClass=frClient)"
+radius_ldap_client_identifier_attribute: radiusClientIdentifier
+radius_ldap_client_secret_attribute: radiusClientSecret
+radius_clients_base_dn: "ou=radius_clients,{{ radius_ldap_base_dn }}"
+radius_dynamic_client_networks: []
+radius_dynamic_client_server_name: dynamic_clients_ref
+radius_dynamic_client_lifetime: 3600
+radius_dynamic_client_lookup_attribute: cn
+radius_dynamic_client_shortname_attribute: l
+radius_dynamic_client_secret_lookup_attribute: ou
+radius_dynamic_client_nas_type: other
+radius_dynamic_client_ldap_uri: ""
+radius_manage_ldap_module: true
+radius_manage_default_site: true
+radius_manage_inner_tunnel_site: true

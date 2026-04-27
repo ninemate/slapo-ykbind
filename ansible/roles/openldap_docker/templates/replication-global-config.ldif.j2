@@ -1,0 +1,8 @@
+dn: cn=config
+changetype: modify
+{% if ldap_mirrormode_enabled | bool %}
+replace: olcServerID
+olcServerID: {{ ldap_replication_server_id_value }}
+{% else %}
+delete: olcServerID
+{% endif %}

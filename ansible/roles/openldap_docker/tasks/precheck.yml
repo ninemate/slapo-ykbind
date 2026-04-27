@@ -1,0 +1,281 @@
+---
+- name: Inspect existing LDAP config/data directories on target host
+  ansible.builtin.find:
+    paths: "{{ item.path }}"
+    recurse: false
+    hidden: true
+  loop:
+    - name: config
+      path: "{{ ldap_config_dir }}"
+    - name: data
+      path: "{{ ldap_data_dir }}"
+  register: ldap_existing_dir_checks
+  failed_when: false
+
+- name: Store existing LDAP directory state
+  ansible.builtin.set_fact:
+    ldap_existing_config_dir_state: "{{ (ldap_existing_dir_checks.results | selectattr('item.name', 'equalto', 'config') | list | first) | default({}) }}"
+    ldap_existing_data_dir_state: "{{ (ldap_existing_dir_checks.results | selectattr('item.name', 'equalto', 'data') | list | first) | default({}) }}"
+
+- name: Reject import-specific variables in adopt_existing mode
+  ansible.builtin.assert:
+    that:
+      - ldap_ldif_import_file | length == 0
+      - ldap_migration_config_ldifs | length == 0
+      - ldap_additional_schema_ldifs | length == 0
+    fail_msg: >-
+      adopt_existing mode starts from an already existing cn=config and data directory.
+      Do not pass full-tree import, migration config LDIFs, or additional schema imports
+      to this mode.
+  when: ldap_adopt_existing_mode | bool
+
+- name: Reject mixed full-tree and individual RADIUS config overrides
+  ansible.builtin.assert:
+    that:
+      - not (
+          (radius_config_src_path | length > 0)
+          and (
+            (radius_radiusd_conf_src_path | length > 0)
+            or (radius_clients_conf_src_path | length > 0)
+            or (radius_mods_available_ldap_src_path | length > 0)
+            or (radius_sites_available_default_src_path | length > 0)
+            or (radius_sites_available_inner_tunnel_src_path | length > 0)
+            or (radius_clients | length > 0)
+            or (radius_dynamic_client_networks | length > 0)
+          )
+        )
+    fail_msg: >-
+      radius_config_src_dir mounts a complete FreeRADIUS config tree.
+      Do not mix it with per-file RADIUS overrides or templated radius_clients data.
+  when: radius_enabled | bool
+
+- name: Require at least one usable RADIUS config path when RADIUS is enabled
+  ansible.builtin.assert:
+    that:
+      - radius_use_full_config_tree
+        or radius_mount_clients_conf
+        or radius_mount_ldap_module
+        or radius_mount_default_site
+        or radius_mount_inner_tunnel_site
+        or radius_mount_radiusd_conf
+    fail_msg: >-
+      radius_enabled=true, but no FreeRADIUS config source was selected.
+      Provide radius_config_src_dir for a full existing config tree, or use the
+      managed LDAP/site templates and optional clients.conf overrides.
+  when: radius_enabled | bool
+
+- name: Read explicit FreeRADIUS main config user/group directives from control node
+  ansible.builtin.shell: |
+    awk '
+      match($0, /^[[:space:]]*user[[:space:]]*=[[:space:]]*([^[:space:]#]+)/, m) { print "user=" m[1] }
+      match($0, /^[[:space:]]*group[[:space:]]*=[[:space:]]*([^[:space:]#]+)/, m) { print "group=" m[1] }
+    ' "{{ radius_main_config_src_path }}"
+  args:
+    executable: /bin/bash
+  register: radius_main_config_identity_directives
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - radius_enabled | bool
+    - radius_main_config_src_path | length > 0
+
+- name: Reject incompatible explicit FreeRADIUS main config user/group directives
+  ansible.builtin.assert:
+    that:
+      - >
+        (
+          radius_main_config_identity_directives.stdout_lines
+          | select('match', '^user=')
+          | map('regex_replace', '^user=', '')
+          | list
+          | first
+          | default(radius_runtime_user)
+        ) == radius_runtime_user
+      - >
+        (
+          radius_main_config_identity_directives.stdout_lines
+          | select('match', '^group=')
+          | map('regex_replace', '^group=', '')
+          | list
+          | first
+          | default(radius_runtime_group)
+        ) == radius_runtime_group
+    fail_msg: >-
+      The supplied FreeRADIUS main config contains explicit user/group directives
+      that do not match the container runtime identity. Update radiusd.conf to use
+      user={{ radius_runtime_user }} and group={{ radius_runtime_group }}, or remove
+      the explicit directives entirely. Numeric IDs such as {{ radius_runtime_uid }}
+      / {{ radius_runtime_gid }} are not accepted here.
+  when:
+    - radius_enabled | bool
+    - radius_main_config_src_path | length > 0
+
+- name: Reject destructive import input in maintenance mode
+  ansible.builtin.assert:
+    that:
+      - ldap_ldif_import_file | length == 0
+    fail_msg: >-
+      maintenance mode never reloads the LDAP tree. Remove ldap_ldif_import_file
+      and use full_import if a full restore is required.
+  when: ldap_maintenance_mode | bool
+
+- name: Validate required mirrormode inputs
+  ansible.builtin.assert:
+    that:
+      - ldap_server_id | string | length > 0
+      - ldap_replication_peer_server_id | string | length > 0
+      - (ldap_server_id | int) != (ldap_replication_peer_server_id | int)
+      - ldap_replication_bind_dn | length > 0
+      - ldap_replication_bind_password | length > 0
+      - ldap_replication_self_uri_effective | length > 0
+      - ldap_replication_peer_uri_effective | length > 0
+      - ldap_replication_rid_effective | length > 0
+      - not (ldap_replication_use_ldaps | bool) or (ldap_enable_ldaps | bool)
+    fail_msg: >-
+      ldap_mirrormode_enabled=true requires ldap_server_id, ldap_replication_peer_server_id,
+      ldap_replication_bind_dn, ldap_replication_bind_password, and resolvable self/peer LDAP URIs.
+      If ldap_replication_use_ldaps=true, ldap_enable_ldaps must also be true on the node.
+  when: ldap_mirrormode_enabled | bool
+
+- name: Validate required firewall whitelist inputs
+  ansible.builtin.assert:
+    that:
+      - ldap_firewall_ssh_allowed_cidrs | length > 0
+      - ldap_firewall_service_allowed_cidrs | length > 0
+    fail_msg: >-
+      ldap_manage_host_firewall=true requires explicit non-empty ldap_firewall_ssh_allowed_cidrs
+      and ldap_firewall_service_allowed_cidrs values. The defaults are intentionally empty.
+  when: ldap_manage_host_firewall | bool
+
+- name: Validate required TLS source inputs for LDAPS
+  ansible.builtin.assert:
+    that:
+      - ldap_tls_certificate_src_path_effective | length > 0
+      - ldap_tls_private_key_src_path_effective | length > 0
+    fail_msg: >-
+      ldap_enable_ldaps=true, but no certificate/key source could be resolved.
+      Set ldap_tls_certificate_src and ldap_tls_private_key_src explicitly, or place files in
+      repo tls/ named {{ ldap_tls_cert_file | basename }} and {{ ldap_tls_key_file | basename }}.
+      Optional CA fallback path is {{ ldap_tls_ca_file | basename }}.
+  when: ldap_enable_ldaps | bool
+
+- name: Require existing cn=config directory for adopt_existing mode
+  ansible.builtin.assert:
+    that:
+      - ldap_existing_config_dir_state.examined | default(0) | int > 0
+      - ldap_existing_config_dir_state.matched | default(0) | int > 0
+    fail_msg: >-
+      adopt_existing mode requires a populated cn=config directory at {{ ldap_config_dir }}.
+      The directory is missing or empty on the target host.
+  when: ldap_adopt_existing_mode | bool
+
+- name: Require existing data directory for adopt_existing mode
+  ansible.builtin.assert:
+    that:
+      - ldap_existing_data_dir_state.examined | default(0) | int > 0
+      - ldap_existing_data_dir_state.matched | default(0) | int > 0
+    fail_msg: >-
+      adopt_existing mode requires a populated data directory at {{ ldap_data_dir }}.
+      The directory is missing or empty on the target host.
+  when: ldap_adopt_existing_mode | bool
+
+- name: Inspect existing LDAP container for maintenance mode
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - "{{ ldap_container_name }}"
+  register: ldap_maintenance_container_inspect_cmd
+  changed_when: false
+  failed_when: false
+  when: ldap_maintenance_mode | bool
+
+- name: Fail when maintenance mode cannot find the managed container
+  ansible.builtin.fail:
+    msg: >-
+      maintenance mode requires an already deployed LDAP container named
+      {{ ldap_container_name }}, but docker inspect could not find it.
+      Use full_import or adopt_existing for first-time deployment.
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc != 0
+
+- name: Store maintenance container metadata
+  ansible.builtin.set_fact:
+    ldap_maintenance_container_info: "{{ (ldap_maintenance_container_inspect_cmd.stdout | from_json | first) }}"
+    ldap_maintenance_container_labels: "{{ ((ldap_maintenance_container_inspect_cmd.stdout | from_json | first).Config.Labels | default({})) }}"
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc == 0
+
+- name: Derive maintenance container checks
+  ansible.builtin.set_fact:
+    ldap_maintenance_container_state: "{{ ldap_maintenance_container_info.State.Status | default('unknown') }}"
+    ldap_maintenance_managed_label_present: "{{ ldap_maintenance_container_labels.get('com.yubik.openldap.managed', 'false') == 'true' }}"
+    ldap_maintenance_mounts_match: >-
+      {{
+        ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', '/var/lib/ldap') | map(attribute='Source') | list | first | default('')) == ldap_data_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', '/etc/ldap/slapd.d') | map(attribute='Source') | list | first | default('')) == ldap_config_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', '/var/log/slapd') | map(attribute='Source') | list | first | default('')) == ldap_log_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', ldap_container_bootstrap_dir ~ '/ldif') | map(attribute='Source') | list | first | default('')) == ldap_runtime_ldif_dir)
+        and ((ldap_maintenance_container_info.Mounts | default([]) | selectattr('Destination', 'equalto', ldap_container_bootstrap_dir ~ '/schema') | map(attribute='Source') | list | first | default('')) == ldap_runtime_schema_dir)
+      }}
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc == 0
+
+- name: Derive maintenance legacy signature match
+  ansible.builtin.set_fact:
+    ldap_maintenance_legacy_match: >-
+      {{
+        ((ldap_maintenance_container_info.Config.Image | default('')) == ldap_image_name)
+        and (ldap_maintenance_mounts_match | default(false))
+      }}
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_container_inspect_cmd.rc == 0
+
+- name: Require a playbook-managed container signature for maintenance mode
+  ansible.builtin.assert:
+    that:
+      - ldap_maintenance_mounts_match | bool
+      - ldap_maintenance_managed_label_present or ldap_maintenance_legacy_match
+    fail_msg: >-
+      maintenance mode found container {{ ldap_container_name }}, but it does not
+      match the bind mounts and managed-service metadata expected by this role.
+      Refusing in-place modification to avoid touching an unrelated LDAP container.
+  when: ldap_maintenance_mode | bool
+
+- name: Require matching runtime uid/gid for managed maintenance mode
+  ansible.builtin.assert:
+    that:
+      - ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-uid', ldap_runtime_uid | string) == (ldap_runtime_uid | string)
+      - ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-gid', ldap_runtime_gid | string) == (ldap_runtime_gid | string)
+    fail_msg: >-
+      maintenance mode cannot change ldap_runtime_uid/gid without rebuilding the image.
+      The managed container labels report uid={{ ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-uid', 'unknown') }}
+      gid={{ ldap_maintenance_container_labels.get('com.yubik.openldap.runtime-gid', 'unknown') }},
+      but the requested values are uid={{ ldap_runtime_uid }} gid={{ ldap_runtime_gid }}.
+      Use full_import or adopt_existing with image rebuild for a runtime uid/gid change.
+  when:
+    - ldap_maintenance_mode | bool
+    - ldap_maintenance_managed_label_present | bool
+
+- name: Show detected target state for maintenance mode
+  ansible.builtin.debug:
+    msg:
+      - "maintenance mode will update the existing managed container in place."
+      - "container_state={{ ldap_maintenance_container_state }}"
+      - "managed_label={{ ldap_maintenance_managed_label_present }}"
+      - "legacy_signature_match={{ ldap_maintenance_legacy_match }}"
+  when: ldap_maintenance_mode | bool
+
+- name: Show detected target state for full_import mode
+  ansible.builtin.debug:
+    msg:
+      - "full_import mode will recreate the persistent target directories before container start."
+      - "config dir={{ ldap_config_dir }} existing entries={{ ldap_existing_config_dir_state.matched | default(0) }}"
+      - "data dir={{ ldap_data_dir }} existing entries={{ ldap_existing_data_dir_state.matched | default(0) }}"
+  when: ldap_full_import_requested | bool

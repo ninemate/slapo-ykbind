@@ -1,0 +1,22 @@
+---
+- name: Auto-derive base DN from existing config when default example DN is still used in maintenance mode
+  ansible.builtin.set_fact:
+    ldap_base_dn: "{{ ldap_current_suffix }}"
+  when:
+    - ldap_base_dn == 'dc=example,dc=org'
+    - ldap_current_suffix | length > 0
+
+- name: Auto-derive admin DN from existing config when default example admin DN is still used in maintenance mode
+  ansible.builtin.set_fact:
+    ldap_admin_dn: "{{ ldap_current_rootdn }}"
+  when:
+    - ldap_admin_dn == 'cn=admin,dc=example,dc=org'
+    - ldap_current_rootdn | length > 0
+
+- name: Show maintained LDAP state
+  ansible.builtin.debug:
+    msg:
+      - "maintenance mode: existing managed container updated in place without rebuild or full restore."
+      - "database_dn={{ ldap_database_config_dn }}"
+      - "suffix={{ ldap_current_suffix }}"
+      - "rootdn={{ ldap_current_rootdn }}"

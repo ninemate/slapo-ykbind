@@ -2,11 +2,25 @@
 - name: Derive effective input values
   ansible.builtin.import_tasks: derive_inputs.yml
 
+- name: Prepare local artifact root on control node
+  ansible.builtin.import_tasks: local_artifacts.yml
+
 - name: Build image on control node
   ansible.builtin.import_tasks: local_build.yml
+  when: ldap_requires_image_refresh | bool
+
+- name: Build RADIUS image on control node
+  ansible.builtin.import_tasks: radius_local_build.yml
+  when: radius_requires_image_refresh | bool
 
 - name: Install host prerequisites
   ansible.builtin.import_tasks: prerequisites.yml
+
+- name: Validate target host state for selected mode
+  ansible.builtin.import_tasks: precheck.yml
+
+- name: Reset target before requested full import
+  ansible.builtin.import_tasks: reset.yml
 
 - name: Create deploy directories
   ansible.builtin.import_tasks: directories.yml
@@ -14,14 +28,35 @@
 - name: Render Docker and LDIF assets
   ansible.builtin.import_tasks: render.yml
 
+- name: Render RADIUS assets
+  ansible.builtin.import_tasks: radius_render.yml
+  when: radius_enabled | bool
+
 - name: Build image and start container
   ansible.builtin.import_tasks: build_and_run.yml
 
 - name: Configure LDAP server
   ansible.builtin.import_tasks: configure.yml
+  when: ldap_manage_runtime_config | bool
 
-- name: Run optional LDIF imports
+- name: Adopt existing LDAP state
+  ansible.builtin.import_tasks: adopt_existing.yml
+  when: ldap_adopt_existing_mode | bool
+
+- name: Maintain existing LDAP state
+  ansible.builtin.import_tasks: maintenance.yml
+  when: ldap_maintenance_mode | bool
+
+- name: Run full import tasks
   ansible.builtin.import_tasks: import.yml
+  when: ldap_full_import_requested | bool
+
+- name: Reconcile LDAP mirrormode replication
+  ansible.builtin.import_tasks: replication_configure.yml
 
 - name: Run smoke tests
   ansible.builtin.import_tasks: verify.yml
+
+- name: Run RADIUS smoke tests
+  ansible.builtin.import_tasks: radius_verify.yml
+  when: radius_enabled | bool

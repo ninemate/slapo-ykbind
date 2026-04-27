@@ -2,57 +2,89 @@
   ansible.builtin.copy:
     src: "{{ repo_root }}/schema/yubikey-otp.ldif"
     dest: "{{ ldap_runtime_schema_dir }}/yubikey-otp.ldif"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
 
 - name: Copy optional TLS material to target host
   ansible.builtin.copy:
     src: "{{ item.src if item.src.startswith('/') else repo_root ~ '/' ~ item.src }}"
     dest: "{{ ldap_tls_host_dir }}/{{ item.dest }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "{{ item.mode }}"
   loop:
-    - src: "{{ ldap_tls_certificate_src }}"
-      dest: tls.crt
+    - src: "{{ ldap_tls_certificate_src_path_effective }}"
+      dest: "{{ ldap_tls_cert_file | basename }}"
       mode: "0644"
-    - src: "{{ ldap_tls_private_key_src }}"
-      dest: tls.key
+    - src: "{{ ldap_tls_private_key_src_path_effective }}"
+      dest: "{{ ldap_tls_key_file | basename }}"
       mode: "0600"
-    - src: "{{ ldap_tls_ca_src }}"
-      dest: ca.crt
+    - src: "{{ ldap_tls_ca_src_path_effective }}"
+      dest: "{{ ldap_tls_ca_file | basename }}"
       mode: "0644"
   when:
-    - ldap_enable_ldaps
+    - ldap_enable_ldaps | bool
     - item.src | length > 0
+  register: ldap_tls_material_copy
 
 - name: Copy additional schema LDIFs to target host
   ansible.builtin.copy:
     src: "{{ item if item.startswith('/') else repo_root ~ '/' ~ item }}"
     dest: "{{ ldap_runtime_schema_dir }}/{{ item | basename }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   loop: "{{ ldap_additional_schema_ldifs }}"
   when: ldap_additional_schema_ldifs | length > 0
+
+- name: Copy optional migration config LDIFs to target host
+  ansible.builtin.copy:
+    src: "{{ item if item.startswith('/') else repo_root ~ '/' ~ item }}"
+    dest: "{{ ldap_runtime_config_import_dir }}/{{ item | basename }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
+    mode: "0644"
+  loop: "{{ ldap_migration_config_ldifs }}"
+  when: ldap_migration_config_ldifs | length > 0
+
+- name: Store TLS material change state
+  ansible.builtin.set_fact:
+    ldap_tls_material_changed: >-
+      {{
+        (ldap_tls_material_copy.results | default([]) | selectattr('changed', 'equalto', true) | list | length) > 0
+      }}
 
 - name: Render Docker Compose manifest
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ ldap_compose_file }}"
     mode: "0644"
+  register: ldap_compose_manifest_template
+
+- name: Store Docker Compose manifest change state
+  ansible.builtin.set_fact:
+    ldap_compose_manifest_changed: "{{ ldap_compose_manifest_template.changed | default(false) }}"
+
+- name: Render systemd unit for Docker Compose stack
+  ansible.builtin.template:
+    src: openldap-compose.service.j2
+    dest: "{{ ldap_systemd_unit_file }}"
+    mode: "0644"
+  register: ldap_systemd_unit_template
+
+- name: Store systemd unit change state
+  ansible.builtin.set_fact:
+    ldap_systemd_unit_changed: "{{ ldap_systemd_unit_template.changed | default(false) }}"
+    radius_config_changed: "{{ radius_config_changed | default(false) }}"
 
 - name: Render LDAP configuration LDIF assets
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ ldap_runtime_ldif_dir }}/{{ item.dest }}"
+    owner: "{{ ldap_runtime_uid | string }}"
+    group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   loop:
-    - src: base-entry.ldif.j2
-      dest: base-entry.ldif
-    - src: module-load.ldif.j2
-      dest: module-load.ldif
     - src: tls-config.ldif.j2
       dest: tls-config.ldif
-
-- name: Render OU LDIF files
-  ansible.builtin.template:
-    src: ou-entry.ldif.j2
-    dest: "{{ ldap_runtime_ldif_dir }}/ou-{{ item | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
-    mode: "0644"
-  loop: "{{ ldap_base_ous }}"

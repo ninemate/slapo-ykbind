@@ -1,0 +1,44 @@
+---
+- name: Wait until ldapi is ready inside the container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapwhoami
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+  register: ldap_ldapi_ready
+  retries: 30
+  delay: 2
+  until: ldap_ldapi_ready.rc == 0
+  changed_when: false
+
+- name: Discover the primary LDAP database entry
+  ansible.builtin.shell: >
+    docker exec {{ ldap_container_name }} sh -lc
+    "ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config
+    '(&(objectClass=olcDatabaseConfig)(!(olcDatabase=config))(!(olcDatabase=frontend))(olcSuffix=*))'
+    dn olcSuffix olcRootDN |
+    awk '
+      /^dn: / { sub(/^dn: /, \"\", \$0); dn=\$0 }
+      /^olcSuffix: / { sub(/^olcSuffix: /, \"\", \$0); suffix=\$0 }
+      /^olcRootDN: / { sub(/^olcRootDN: /, \"\", \$0); rootdn=\$0 }
+      END { if (dn != \"\") { printf \"%s|%s|%s\\n\", dn, suffix, rootdn } }
+    '"
+  register: ldap_db_lookup
+  changed_when: false
+
+- name: Fail if no LDAP database entry was found
+  ansible.builtin.fail:
+    msg: "Nem sikerült azonosítani az OpenLDAP backend adatbázist a cn=config alatt."
+  when: ldap_db_lookup.stdout | trim == ""
+
+- name: Store current database metadata
+  ansible.builtin.set_fact:
+    ldap_database_config_dn: "{{ (ldap_db_lookup.stdout.split('|'))[0] }}"
+    ldap_current_suffix: "{{ (ldap_db_lookup.stdout.split('|'))[1] }}"
+    ldap_current_rootdn: "{{ (ldap_db_lookup.stdout.split('|'))[2] }}"

@@ -1,0 +1,7 @@
+# LDAP migration artifacts (NE kerüljenek Gitbe)
+ansible/ansible.log
+schema/schema.ldif
+schema/source-schema.reference.ldif
+exports/*.ldif
+exports/full-tree.ldif
+exports/full-tree.filtered.ldif

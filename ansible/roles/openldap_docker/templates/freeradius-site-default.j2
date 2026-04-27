@@ -1,0 +1,81 @@
+server default {
+  listen {
+    type = auth
+    ipaddr = *
+    port = {{ radius_container_auth_port }}
+  }
+
+  listen {
+    type = acct
+    ipaddr = *
+    port = {{ radius_container_acct_port }}
+  }
+
+  authorize {
+    preprocess
+    if (&CHAP-Password || &MS-CHAP-Challenge || &MS-CHAP-Response) {
+      update reply {
+        Reply-Message := "Use PAP for LDAP-backed RADIUS login"
+      }
+      reject
+    }
+    chap
+    mschap
+    digest
+    suffix
+    eap {
+      ok = return
+    }
+    files
+    expiration
+    logintime
+    ldap
+    if ((ok || updated) && &User-Password) {
+      update control {
+        Auth-Type := LDAP
+      }
+    }
+  }
+
+  authenticate {
+    Auth-Type PAP {
+      pap
+    }
+
+    Auth-Type CHAP {
+      chap
+    }
+
+    Auth-Type MS-CHAP {
+      mschap
+    }
+
+    Auth-Type LDAP {
+      ldap
+    }
+
+    digest
+    eap
+  }
+
+  preacct {
+    preprocess
+    suffix
+  }
+
+  accounting {
+    detail
+    ldap
+  }
+
+  session {
+  }
+
+  post-auth {
+    ldap
+  }
+
+  Post-Auth-Type REJECT {
+    attr_filter.access_reject
+  }
+}

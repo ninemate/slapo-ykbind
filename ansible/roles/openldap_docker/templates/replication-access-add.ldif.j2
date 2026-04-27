@@ -1,0 +1,4 @@
+dn: {{ ldap_database_config_dn }}
+changetype: modify
+add: olcAccess
+olcAccess: {0}to * by dn.exact="{{ ldap_replication_bind_dn }}" read by * break

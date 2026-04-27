@@ -2,12 +2,24 @@ services:
   openldap:
     container_name: {{ ldap_container_name }}
     image: {{ ldap_image_name }}
+    labels:
+      com.yubik.openldap.managed: "true"
+      com.yubik.openldap.deploy-root: {{ ldap_deploy_root | quote }}
+      com.yubik.openldap.runtime-uid: {{ (ldap_runtime_uid | string) | quote }}
+      com.yubik.openldap.runtime-gid: {{ (ldap_runtime_gid | string) | quote }}
     environment:
       LDAP_BASE_DN: {{ ldap_base_dn | quote }}
       LDAP_DOMAIN: {{ ldap_domain | quote }}
       LDAP_ORGANIZATION: {{ ldap_organization | quote }}
       LDAP_ADMIN_DN: {{ ldap_admin_dn | quote }}
       LDAP_ADMIN_PASSWORD: {{ ldap_admin_password | quote }}
+      LDAP_INIT_MODE: {{ ldap_effective_init_mode | quote }}
+      LDAP_RUNTIME_USER: {{ ldap_runtime_user | quote }}
+      LDAP_RUNTIME_GROUP: {{ ldap_runtime_group | quote }}
+      LDAP_RUNTIME_UID: {{ ldap_runtime_uid | quote }}
+      LDAP_RUNTIME_GID: {{ ldap_runtime_gid | quote }}
+      LDAP_INTERNAL_LDAP_PORT: {{ ldap_container_ldap_port | quote }}
+      LDAP_INTERNAL_LDAPS_PORT: {{ ldap_container_ldaps_port | quote }}
       LDAP_ENABLE_LDAPS: {{ (ldap_enable_ldaps | bool) | ternary('true', 'false') | quote }}
       LDAP_ENABLE_SYSLOG_NG: {{ (ldap_enable_syslog_ng | bool) | ternary('true', 'false') | quote }}
       LDAP_OPEN_FILES_LIMIT: {{ ldap_open_files_limit | quote }}
@@ -32,9 +44,9 @@ services:
       - {{ port_mapping | quote }}
 {%   endfor %}
 {% else %}
-      - "{{ ldap_listen_port }}:389"
+      - "{{ ldap_listen_port }}:{{ ldap_container_ldap_port }}"
 {%   if ldap_enable_ldaps %}
-      - "{{ ldap_ldaps_port }}:636"
+      - "{{ ldap_ldaps_port }}:{{ ldap_container_ldaps_port }}"
 {%   endif %}
 {% endif %}
     volumes:
@@ -46,3 +58,71 @@ services:
 {% if ldap_enable_ldaps %}
       - "{{ ldap_tls_host_dir }}:{{ ldap_container_tls_dir }}:ro"
 {% endif %}
+    networks:
+      default:
+        aliases:
+          - openldap
+          - {{ ldap_container_name | quote }}
+{% if radius_enabled %}
+
+  radius:
+    container_name: {{ radius_container_name }}
+    image: {{ radius_image_name }}
+    depends_on:
+      - openldap
+    labels:
+      com.yubik.radius.managed: "true"
+      com.yubik.radius.deploy-root: {{ radius_deploy_root | quote }}
+      com.yubik.radius.runtime-uid: {{ (radius_runtime_uid | string) | quote }}
+      com.yubik.radius.runtime-gid: {{ (radius_runtime_gid | string) | quote }}
+    environment:
+      RADIUS_CONFIG_DIR: {{ radius_container_config_dir | quote }}
+      RADIUS_LOG_DIR: {{ radius_container_log_dir | quote }}
+      RADIUS_RUN_DIR: {{ radius_container_run_dir | quote }}
+      RADIUS_DAEMON_FLAGS: {{ radius_daemon_flags | quote }}
+      RADIUS_LDAP_HEALTHCHECK_URI: {{ radius_container_healthcheck_ldap_uri_effective | quote }}
+      RADIUS_LDAP_BIND_DN: {{ radius_ldap_bind_dn | quote }}
+      RADIUS_LDAP_BIND_PASSWORD: {{ radius_ldap_bind_password | quote }}
+    hostname: {{ radius_container_name }}
+    restart: unless-stopped
+    user: "{{ radius_runtime_user }}:{{ radius_runtime_group }}"
+    ports:
+{% if radius_ports | length > 0 %}
+{%   for port_mapping in radius_ports %}
+      - {{ port_mapping | quote }}
+{%   endfor %}
+{% else %}
+      - "{{ radius_listen_auth_port }}:{{ radius_container_auth_port }}/udp"
+      - "{{ radius_listen_acct_port }}:{{ radius_container_acct_port }}/udp"
+{% endif %}
+    volumes:
+{% if radius_use_full_config_tree %}
+      - "{{ radius_config_dir }}:{{ radius_container_config_dir }}:ro"
+{% else %}
+{%   if radius_mount_radiusd_conf %}
+      - "{{ radius_config_dir }}/radiusd.conf:{{ radius_container_config_dir }}/radiusd.conf:ro"
+{%   endif %}
+{%   if radius_mount_clients_conf %}
+      - "{{ radius_config_dir }}/clients.conf:{{ radius_container_config_dir }}/clients.conf:ro"
+{%   endif %}
+{%   if radius_mount_ldap_module %}
+      - "{{ radius_config_dir }}/mods-available/ldap:{{ radius_container_config_dir }}/mods-available/ldap:ro"
+      - "{{ radius_config_dir }}/mods-enabled/ldap:{{ radius_container_config_dir }}/mods-enabled/ldap:ro"
+{%   endif %}
+{%   if radius_dynamic_client_networks | length > 0 %}
+      - "{{ radius_dynamic_clients_module_host_path }}:{{ radius_container_config_dir }}/mods-available/dynamic_clients:ro"
+      - "{{ radius_config_dir }}/mods-enabled/dynamic_clients:{{ radius_container_config_dir }}/mods-enabled/dynamic_clients:ro"
+{%   endif %}
+{%   if radius_mount_default_site %}
+      - "{{ radius_config_dir }}/sites-enabled/default:{{ radius_container_config_dir }}/sites-enabled/default:ro"
+{%   endif %}
+{%   if radius_mount_inner_tunnel_site %}
+      - "{{ radius_config_dir }}/sites-enabled/inner-tunnel:{{ radius_container_config_dir }}/sites-enabled/inner-tunnel:ro"
+{%   endif %}
+{% endif %}
+      - "{{ radius_log_dir }}:{{ radius_container_log_dir }}"
+      - "{{ radius_run_dir }}:{{ radius_container_run_dir }}"
+{% endif %}
+
+networks:
+  default: {}

@@ -1,5 +1,20 @@
 ---
-- name: Smoke test admin bind with ldapwhoami
+- name: Smoke test ldapi EXTERNAL bind
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapwhoami
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+  register: ldap_ldapi_smoke_check
+  changed_when: false
+
+- name: Smoke test admin bind with ldapwhoami in full_import mode
   ansible.builtin.command:
     argv:
       - docker
@@ -12,11 +27,12 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
   register: ldap_whoami_check
   changed_when: false
+  when: ldap_full_import_requested | bool
 
-- name: Smoke test base search
+- name: Smoke test base search in full_import mode
   ansible.builtin.command:
     argv:
       - docker
@@ -29,7 +45,7 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
       - -LLL
       - -b
       - "{{ ldap_base_dn }}"
@@ -39,8 +55,9 @@
       - dn
   register: ldap_base_search_check
   changed_when: false
+  when: ldap_full_import_requested | bool
 
-- name: Smoke test ykbind overlay visibility
+- name: Smoke test ykbind overlay visibility in full_import mode
   ansible.builtin.command:
     argv:
       - docker
@@ -59,7 +76,9 @@
       - dn
   register: ldap_overlay_smoke_check
   changed_when: false
-  when: ldap_module_build_enabled
+  when:
+    - ldap_full_import_requested | bool
+    - ldap_module_build_enabled | bool
 
 - name: Optional smoke test for a specific user DN
   ansible.builtin.command:
@@ -74,7 +93,7 @@
       - -w
       - "{{ ldap_admin_password }}"
       - -H
-      - ldap://127.0.0.1
+      - "{{ ldap_container_internal_ldap_uri }}"
       - -LLL
       - -b
       - "{{ ldap_smoke_test_user_dn }}"
@@ -83,5 +102,68 @@
       - "(objectClass=*)"
       - dn
   changed_when: false
-  when: ldap_smoke_test_user_dn | length > 0
+  when:
+    - ldap_full_import_requested | bool
+    - ldap_smoke_test_user_dn | length > 0
 
+- name: Smoke test mirrormode global config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - cn=config
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcServerID
+  register: ldap_mirrormode_global_check
+  changed_when: false
+  when: ldap_mirrormode_enabled | bool
+
+- name: Smoke test mirrormode database config
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapsearch
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -LLL
+      - -o
+      - ldif-wrap=no
+      - -b
+      - "{{ ldap_database_config_dn }}"
+      - -s
+      - base
+      - "(objectClass=*)"
+      - olcSyncRepl
+      - olcMultiProvider
+  register: ldap_mirrormode_db_check
+  changed_when: false
+  when: ldap_mirrormode_enabled | bool
+
+- name: Assert mirrormode config is present
+  ansible.builtin.assert:
+    that:
+      - "'olcServerID: ' ~ ldap_server_id in (ldap_mirrormode_global_check.stdout | default(''))"
+      - "'olcMultiProvider: TRUE' in (ldap_mirrormode_db_check.stdout | default(''))"
+      - "'provider=' ~ ldap_replication_peer_uri_effective in (ldap_mirrormode_db_check.stdout | default(''))"
+    fail_msg: >-
+      Mirrormode configuration did not render correctly into cn=config.
+      Inspect olcServerID and olcSyncRepl under {{ ldap_database_config_dn }}.
+  when: ldap_mirrormode_enabled | bool

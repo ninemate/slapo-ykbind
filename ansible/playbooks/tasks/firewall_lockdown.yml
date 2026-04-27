@@ -1,0 +1,214 @@
+---
+- name: Build managed service firewall rule list
+  ansible.builtin.set_fact:
+    ldap_firewall_service_rules: >-
+      {{
+        [{'proto': 'tcp', 'port': ldap_listen_port}]
+        + ((ldap_enable_ldaps | bool) | ternary([{'proto': 'tcp', 'port': ldap_ldaps_port}], []))
+        + ((radius_enabled | bool) | ternary([
+            {'proto': 'udp', 'port': radius_auth_port},
+            {'proto': 'udp', 'port': radius_acct_port}
+          ], []))
+      }}
+
+- name: Ensure managed INPUT firewall chain exists
+  ansible.builtin.shell: |
+    iptables -nL "{{ ldap_firewall_input_chain }}" >/dev/null 2>&1 || iptables -N "{{ ldap_firewall_input_chain }}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure DOCKER-USER chain exists
+  ansible.builtin.shell: |
+    iptables -nL DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure managed DOCKER-USER firewall chain exists
+  ansible.builtin.shell: |
+    iptables -nL "{{ ldap_firewall_docker_user_chain }}" >/dev/null 2>&1 || iptables -N "{{ ldap_firewall_docker_user_chain }}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Flush managed INPUT firewall chain
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -F
+      - "{{ ldap_firewall_input_chain }}"
+
+- name: Flush managed DOCKER-USER firewall chain
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -F
+      - "{{ ldap_firewall_docker_user_chain }}"
+
+- name: Ensure INPUT jumps to managed firewall chain
+  ansible.builtin.shell: |
+    iptables -C INPUT -j "{{ ldap_firewall_input_chain }}" >/dev/null 2>&1 || iptables -I INPUT 1 -j "{{ ldap_firewall_input_chain }}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure FORWARD jumps to DOCKER-USER
+  ansible.builtin.shell: |
+    iptables -C FORWARD -j DOCKER-USER >/dev/null 2>&1 || iptables -I FORWARD 1 -j DOCKER-USER
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure DOCKER-USER jumps to managed firewall chain
+  ansible.builtin.shell: |
+    iptables -C DOCKER-USER -j "{{ ldap_firewall_docker_user_chain }}" >/dev/null 2>&1 || iptables -I DOCKER-USER 1 -j "{{ ldap_firewall_docker_user_chain }}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Allow established traffic on INPUT
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_input_chain }}"
+      - -m
+      - conntrack
+      - --ctstate
+      - ESTABLISHED,RELATED
+      - -j
+      - ACCEPT
+
+- name: Allow loopback traffic on INPUT
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_input_chain }}"
+      - -i
+      - lo
+      - -j
+      - ACCEPT
+
+- name: Allow SSH from approved networks
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_input_chain }}"
+      - -p
+      - tcp
+      - -s
+      - "{{ item }}"
+      - --dport
+      - "{{ ldap_firewall_ssh_port | string }}"
+      - -j
+      - ACCEPT
+  loop: "{{ ldap_firewall_ssh_allowed_cidrs }}"
+
+- name: Allow LDAP and RADIUS service ports on INPUT from approved networks
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_input_chain }}"
+      - -p
+      - "{{ item.0.proto }}"
+      - -s
+      - "{{ item.1 }}"
+      - --dport
+      - "{{ item.0.port | string }}"
+      - -j
+      - ACCEPT
+  loop: "{{ ldap_firewall_service_rules | product(ldap_firewall_service_allowed_cidrs) | list }}"
+
+- name: Drop all other inbound traffic in managed INPUT chain
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_input_chain }}"
+      - -j
+      - DROP
+
+- name: Allow established forwarded traffic
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_docker_user_chain }}"
+      - -m
+      - conntrack
+      - --ctstate
+      - ESTABLISHED,RELATED
+      - -j
+      - ACCEPT
+
+- name: Return container-originated traffic without filtering
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_docker_user_chain }}"
+      - -i
+      - "{{ item }}"
+      - -j
+      - RETURN
+  loop:
+    - docker0
+    - br+
+
+- name: Allow LDAP and RADIUS forwarded traffic from approved networks
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_docker_user_chain }}"
+      - -p
+      - "{{ item.0.proto }}"
+      - -s
+      - "{{ item.1 }}"
+      - --dport
+      - "{{ item.0.port | string }}"
+      - -j
+      - ACCEPT
+  loop: "{{ ldap_firewall_service_rules | product(ldap_firewall_service_allowed_cidrs) | list }}"
+
+- name: Drop LDAP and RADIUS forwarded traffic from unapproved networks
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_docker_user_chain }}"
+      - -p
+      - "{{ item.proto }}"
+      - --dport
+      - "{{ item.port | string }}"
+      - -j
+      - DROP
+  loop: "{{ ldap_firewall_service_rules }}"
+
+- name: Return all other forwarded traffic to Docker rules
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -A
+      - "{{ ldap_firewall_docker_user_chain }}"
+      - -j
+      - RETURN
+
+- name: Apply restrictive final iptables policies
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -P
+      - "{{ item.chain }}"
+      - "{{ item.policy }}"
+  loop:
+    - chain: INPUT
+      policy: DROP
+    - chain: FORWARD
+      policy: DROP
+    - chain: OUTPUT
+      policy: ACCEPT

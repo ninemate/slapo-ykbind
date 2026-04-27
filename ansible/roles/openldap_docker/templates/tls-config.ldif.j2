@@ -1,11 +1,15 @@
 dn: cn=config
 changetype: modify
+{% if ldap_tls_ca_file_stat.stat.exists | default(false) %}
 replace: olcTLSCACertificateFile
 olcTLSCACertificateFile: {{ ldap_tls_ca_file }}
 -
+{% elif 'olcTLSCACertificateFile:' in (ldap_tls_config_check.stdout | default('')) %}
+delete: olcTLSCACertificateFile
+-
+{% endif %}
 replace: olcTLSCertificateFile
 olcTLSCertificateFile: {{ ldap_tls_cert_file }}
 -
 replace: olcTLSCertificateKeyFile
 olcTLSCertificateKeyFile: {{ ldap_tls_key_file }}
-
