@@ -144,6 +144,53 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -e ldap_maintenance_restart_container=true
 ```
 
+## Mirrormode (kétirányú replikáció)
+
+Két OpenLDAP szerver replikálja egymás között a directory adatokat. A playbook ugyanaz mindkét VM-en.
+
+### Egyszerű beállítás (ajánlott)
+
+Add meg mindkét node-ot `ldap_mirrormode_nodes` listában. A role auto-detektálja, melyik VM-en fut: egyezést keres a gép FQDN-je vagy IP-je alapján.
+
+```yaml
+ldap_mirrormode_enabled: true
+ldap_mirrormode_nodes:
+  - server_id: 101
+    fqdn: ldap-node-1.example.net
+    ip: 192.0.2.10
+  - server_id: 102
+    fqdn: ldap-node-2.example.net
+    ip: 192.0.2.11
+ldap_replication_bind_dn: "cn=mirrormode,dc=example,dc=org"
+ldap_replication_bind_password: "<jelszó>"
+```
+
+Ugyanez a vars fájl használható mindkét VM-en — nem kell node-onként különböző fájl.
+
+### Hagyományos beállítás (külön változók node-onként)
+
+```yaml
+ldap_mirrormode_enabled: true
+ldap_server_id: 101               # node 1-en
+# ldap_server_id: 102             # node 2-n
+ldap_replication_peer_server_id: 102  # node 1-en
+# ldap_replication_peer_server_id: 101  # node 2-n
+ldap_node_fqdn: ldap-node-1.example.net
+ldap_peer_fqdn: ldap-node-2.example.net
+ldap_replication_bind_dn: "cn=mirrormode,dc=example,dc=org"
+ldap_replication_bind_password: "<jelszó>"
+```
+
+Ha `ldap_mirrormode_nodes` meg van adva, a hagyományos változók értékei automatikusan felülíródnak.
+
+### Mit konfigurál a role
+
+- `olcServerID` beállítása `cn=config`-ban
+- `syncprov` overlay hozzáadása az adatbázishoz
+- `olcSyncRepl` + `olcMultiProvider` a replikációhoz
+- ACL és resource limit a replikációs bind DN-nek
+- Standalone módban (`false`) eltávolítja a fentieket
+
 ## FreeRADIUS relay működése
 
 A FreeRADIUS nem csinál mást, mint:

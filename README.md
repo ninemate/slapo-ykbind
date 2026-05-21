@@ -232,7 +232,7 @@ Proxy variables are intentionally empty by default. Set them explicitly if your 
 
 ## Optional LDAP Mirror Mode
 
-Set `ldap_mirrormode_enabled=true` to have the role configure data-database mirroring between two separately deployed guests. The role keeps this vars-driven so the same playbook can be used in standalone or mirrored mode.
+Set `ldap_mirrormode_enabled=true` to have the role configure data-database mirroring between two separately deployed guests.
 
 What the role reconciles when mirrormode is enabled:
 
@@ -249,8 +249,31 @@ Standalone behavior:
 
 - with `ldap_mirrormode_enabled=false`, the role removes managed `olcServerID`, `olcSyncRepl`, `olcMultiProvider`, and the managed replication ACL/limits rule so the node can run standalone again
 
-Typical vars for node 1:
+### Simplified setup (recommended)
 
+Define both nodes in a single `ldap_mirrormode_nodes` list. The role auto-detects which node it is running on by matching the effective FQDN or IP against each entry:
+
+```yaml
+ldap_mirrormode_enabled: true
+ldap_mirrormode_nodes:
+  - server_id: 101
+    fqdn: ldap-node-1.example.net
+    ip: 192.0.2.10
+  - server_id: 102
+    fqdn: ldap-node-2.example.net
+    ip: 192.0.2.11
+ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
+ldap_replication_bind_password: "<mirror-password>"
+ldap_replication_use_ldaps: false
+```
+
+This single vars file works on **both** VMs without modification. The role matches the current host against `fqdn` or `ip` (tested in that order) and derives `server_id`, peer settings, and replication URIs automatically.
+
+### Legacy setup (individual vars)
+
+The older per-node individual variables still work. Use these when auto-detection is not desirable:
+
+**vars for node 1**:
 ```yaml
 ldap_mirrormode_enabled: true
 ldap_server_id: 101
@@ -264,8 +287,7 @@ ldap_replication_bind_password: "<mirror-password>"
 ldap_replication_use_ldaps: false
 ```
 
-Typical vars for node 2:
-
+**vars for node 2**:
 ```yaml
 ldap_mirrormode_enabled: true
 ldap_server_id: 102
@@ -278,6 +300,10 @@ ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
 ldap_replication_bind_password: "<mirror-password>"
 ldap_replication_use_ldaps: false
 ```
+
+When `ldap_mirrormode_nodes` is set, individual variables are **auto-overridden** and do not need to be specified. When `ldap_mirrormode_nodes` is empty (default), the role falls back to the individual variables.
+
+### LDAPS replication
 
 If both nodes have LDAPS configured and certificates matching the guest FQDNs, switch replication to LDAPS with:
 

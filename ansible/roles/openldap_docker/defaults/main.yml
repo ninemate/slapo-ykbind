@@ -83,6 +83,7 @@ ldap_tls_ca_file: /etc/ldap/tls/ca.crt
 
 ldap_smoke_test_user_dn: ""
 ldap_mirrormode_enabled: false
+ldap_mirrormode_nodes: []
 ldap_server_id: ""
 ldap_replication_peer_server_id: ""
 ldap_node_fqdn: ""
