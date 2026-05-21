@@ -621,9 +621,90 @@ docker exec openldap-ykbind ldapsearch -x -LLL \
   "(cn=192.0.2.10)" cn radiusClientIdentifier radiusClientSecret
 ```
 
+## Per-NAS YubiKey Bypass
+
+Some NAS devices (older network hardware, embedded systems) have a password field limited to 20 characters, making it impossible to append a 44-character YubiKey OTP. This repository supports marking specific NAS client entries in LDAP as exempt from YubiKey validation.
+
+### How it works
+
+1. Add `yubiKeyNasBypass: TRUE` to a NAS client entry under `ou=radius_clients`
+2. FreeRADIUS reads this flag during the `authorize` phase via an inline LDAP lookup (`%{ldap:...}` xlat)
+3. If the flag is `TRUE`, FreeRADIUS uses `Auth-Type := PAP` instead of `Auth-Type := LDAP`
+4. The `pap` module compares the RADIUS `User-Password` against the `userPassword` hash fetched during the LDAP search — no LDAP bind is performed, so the `ykbind` overlay is never reached
+
+This means:
+- If the NAS is exempt, users authenticate with their plain password only (no OTP)
+- If the NAS is NOT exempt, normal YubiKey OTP validation applies
+- The decision is **per NAS device**, not per user — all users through an exempt NAS authenticate with plain password
+
+### Schema
+
+New attribute:
+- `yubiKeyNasBypass` (OID `1.3.6.1.4.1.55555.1.10`) — boolean, single-value
+
+New auxiliary object class:
+- `ykNasBypassAux` (OID `1.3.6.1.4.1.55555.2.2`) — MAY contain `yubiKeyNasBypass`
+
+### Toggle
+
+Set `radius_yubikey_nas_bypass_enabled: false` in your Ansible vars to disable the bypass feature entirely (reverts to the original `Auth-Type := LDAP` decision).
+
+### Adding a NAS client to the bypass list
+
+Add the auxiliary class and attribute to the NAS client entry under `ou=radius_clients`:
+
+```ldif
+dn: cn=10.0.0.1,ou=radius_clients,dc=example,dc=org
+changetype: modify
+add: objectClass
+objectClass: ykNasBypassAux
+-
+add: yubiKeyNasBypass
+yubiKeyNasBypass: TRUE
+```
+
+The attribute is per-NAS — you add it only to the entries for NAS devices that need the bypass. If a NAS entry does not have `yubiKeyNasBypass: TRUE`, YubiKey validation remains active for all users authenticating through it.
+
+### Updating an existing deployment
+
+1. Add `yubiKeyNasBypass: TRUE` to the relevant NAS entries (see above)
+2. Run a maintenance deploy with the restart flag:
+
+```bash
+cd ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e @../vars/<your-vars>.yml \
+  -e ldap_deploy_mode=maintenance \
+  -e ldap_maintenance_restart_container=true
+```
+
+The playbook will:
+- apply the updated schema LDIF (idempotent)
+- render the updated FreeRADIUS templates
+- restart the RADIUS container with the new config
+
+No Docker image rebuild is needed — the changes are in templates and LDAP schema only.
+
+### Full deploy with the new changes
+
+The deploy process is unchanged. The new templates and schema are included automatically. Full import:
+
+```bash
+cd ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=full_import \
+  -e radius_enabled=true \
+  -e @../vars/<your-vars>.yml \
+  -e ldap_ldif_import_file=exports/full-tree.ldif
+```
+
+The schema is imported idempotently during the `configure` phase. The FreeRADIUS config is rendered during the `radius_render` phase.
+
 ## YubiKey Overlay Usage
 
 The bundled schema and overlay are intended to be added to existing user entries as auxiliary classes. The exact structural object classes used in your directory are environment-specific, so keep those mappings in your own migration LDIFs or provisioning logic rather than in repo-specific examples.
+
+NAS client entries under `ou=radius_clients` can use the `ykNasBypassAux` auxiliary class if they need the per-NAS YubiKey bypass feature (see "Per-NAS YubiKey Bypass" above).
 
 ## Sensitive Data Hygiene
 

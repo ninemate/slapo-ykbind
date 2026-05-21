@@ -17,6 +17,68 @@ Two supported models:
      - `sites-enabled/inner-tunnel`
    - or let Ansible render the LDAP module, dynamic client config, and site configs from variables
 
+## Per-NAS YubiKey Bypass
+
+NAS devices with a short password field limit (e.g. 20 characters) cannot append a 44-character YubiKey OTP. The `yubiKeyNasBypass` attribute marks a NAS client entry as exempt from YubiKey validation.
+
+### How it works
+
+1. The `freeradius-site-default.j2` and `freeradius-site-inner-tunnel.j2` templates inject a conditional check in the `authorize` phase.
+2. After the LDAP user search (`ldap` module), if `User-Password` is present, FreeRADIUS performs an inline LDAP lookup:
+   ```
+   "%{ldap:ldap://<ldap-host>:<port>/ou=radius_clients,<base>?yubiKeyNasBypass?sub?(|(cn=%{NAS-Identifier})(cn=%{NAS-IP-Address}))}"
+   ```
+3. If the lookup returns `"TRUE"`, `Auth-Type` is set to `PAP` instead of `LDAP`.
+4. The `pap` module verifies the plaintext `User-Password` against the `userPassword` hash (stored as `control:Password-With-Header` by the ldap module's `update` section). No LDAP bind occurs, so the `ykbind` overlay never intercepts the request.
+
+### Configuration requirements
+
+- The NAS client entry must exist under `ou=radius_clients,<base_dn>` with `cn` equal to the `NAS-IP-Address` or `NAS-Identifier` sent by the device.
+- The entry must have the `ykNasBypassAux` auxiliary class and `yubiKeyNasBypass: TRUE`.
+- The `radius_yubikey_nas_bypass_enabled` default variable controls whether the bypass check is rendered. Set to `false` to disable (reverts to original `Auth-Type := LDAP` behavior).
+
+### Adding a NAS client to the bypass list
+
+Example LDIF — add to each NAS entry that needs the bypass:
+
+```ldif
+dn: cn=10.0.0.1,ou=radius_clients,dc=example,dc=org
+changetype: modify
+add: objectClass
+objectClass: ykNasBypassAux
+-
+add: yubiKeyNasBypass
+yubiKeyNasBypass: TRUE
+```
+
+You only add this to NAS entries that should skip YubiKey. Entries without the attribute are unaffected.
+
+### Updating an existing deployment
+
+Run a maintenance deploy to pick up the template changes:
+
+```bash
+cd ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=maintenance \
+  -e ldap_maintenance_restart_container=true
+```
+
+This applies the updated schema and FreeRADIUS config without rebuilding the Docker image or resetting data.
+
+### Full deployment
+
+No special steps. The templates and schema are part of the standard deploy:
+
+```bash
+cd ansible
+ansible-playbook playbooks/deploy-openldap.yml \
+  -e ldap_deploy_mode=full_import \
+  -e radius_enabled=true \
+  -e ldap_ldif_import_file=exports/full-tree.ldif \
+  -e @../vars/<your-vars>.yml
+```
+
 Typical playbook usage with a full existing config tree:
 
 ```bash

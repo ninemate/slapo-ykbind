@@ -188,6 +188,7 @@ radius_dynamic_client_shortname_attribute: l
 radius_dynamic_client_secret_lookup_attribute: ou
 radius_dynamic_client_nas_type: other
 radius_dynamic_client_ldap_uri: ""
+radius_yubikey_nas_bypass_enabled: true
 radius_manage_ldap_module: true
 radius_manage_default_site: true
 radius_manage_inner_tunnel_site: true
