@@ -85,6 +85,8 @@
         ldap_replication_peer_server_id: "{{ _mirrormode_peer.server_id | default(ldap_replication_peer_server_id) | string }}"
         ldap_peer_fqdn: "{{ _mirrormode_peer.fqdn | default(ldap_peer_fqdn) }}"
         ldap_peer_ip: "{{ _mirrormode_peer.ip | default(ldap_peer_ip) }}"
+        ldap_tls_certificate_src: "{{ _mirrormode_self.tls_cert_src | default(ldap_tls_certificate_src) }}"
+        ldap_tls_private_key_src: "{{ _mirrormode_self.tls_key_src | default(ldap_tls_private_key_src) }}"
 
 - name: Set derived LDAP replication URI facts
   ansible.builtin.set_fact:

@@ -259,15 +259,21 @@ ldap_mirrormode_nodes:
   - server_id: 101
     fqdn: ldap-node-1.example.net
     ip: 192.0.2.10
+    tls_cert_src: tls/node1.crt        # optional, per-node TLS cert
+    tls_key_src: tls/node1.key          # optional, per-node TLS key
   - server_id: 102
     fqdn: ldap-node-2.example.net
     ip: 192.0.2.11
+    tls_cert_src: tls/node2.crt
+    tls_key_src: tls/node2.key
 ldap_replication_bind_dn: "cn=mirrormode,{{ ldap_base_dn }}"
 ldap_replication_bind_password: "<mirror-password>"
 ldap_replication_use_ldaps: false
 ```
 
-This single vars file works on **both** VMs without modification. The role matches the current host against `fqdn` or `ip` (tested in that order) and derives `server_id`, peer settings, and replication URIs automatically.
+The `tls_cert_src` and `tls_key_src` fields are optional. When set, they override TLS source paths per node (paths are relative to the repo root). When omitted, the default `ldap_tls_certificate_src` / `ldap_tls_private_key_src` is used for all nodes.
+
+This single vars file works on **both** VMs without modification. The role matches the current host against `fqdn` or `ip` (tested in that order) and derives `server_id`, peer settings, replication URIs, and TLS source paths automatically. The CA cert (`ldap_tls_ca_src`) is shared between nodes and does not need per-node override.
 
 ### Legacy setup (individual vars)
 

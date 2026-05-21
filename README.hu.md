@@ -158,12 +158,18 @@ ldap_mirrormode_nodes:
   - server_id: 101
     fqdn: ldap-node-1.example.net
     ip: 192.0.2.10
+    tls_cert_src: tls/node1.crt   # opcionális, node-specifikus TLS tanusítvány
+    tls_key_src: tls/node1.key     # opcionális, node-specifikus TLS kulcs
   - server_id: 102
     fqdn: ldap-node-2.example.net
     ip: 192.0.2.11
+    tls_cert_src: tls/node2.crt
+    tls_key_src: tls/node2.key
 ldap_replication_bind_dn: "cn=mirrormode,dc=example,dc=org"
 ldap_replication_bind_password: "<jelszó>"
 ```
+
+A `tls_cert_src` és `tls_key_src` mezők opcionálisak. Ha meg vannak adva, a role az adott node-hoz tartozó TLS tanusítványt és kulcsot használja. A CA tanusítvány (`ldap_tls_ca_src`) közös a két node között.
 
 Ugyanez a vars fájl használható mindkét VM-en — nem kell node-onként különböző fájl.
 
