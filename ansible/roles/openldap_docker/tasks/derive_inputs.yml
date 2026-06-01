@@ -57,6 +57,37 @@
          else (repo_root ~ '/' ~ radius_sites_available_inner_tunnel) if (radius_sites_available_inner_tunnel | length > 0)
          else '' }}
 
+- name: Auto-detect mirrormode node identity from multi-node list
+  when:
+    - ldap_mirrormode_enabled | bool
+    - ldap_mirrormode_nodes | default([]) | length > 0
+  block:
+    - name: Find self node in mirrormode list by FQDN or IP
+      ansible.builtin.set_fact:
+        _mirrormode_self: >-
+          {{ (ldap_mirrormode_nodes | selectattr('fqdn', 'equalto', ldap_node_fqdn_effective) | list | first)
+             | default((ldap_mirrormode_nodes | selectattr('ip', 'equalto', ldap_node_ip_effective) | list | first))
+             | default({}) }}
+        _mirrormode_peer: >-
+          {%- set ns = namespace(found=[]) -%}
+          {%- for n in ldap_mirrormode_nodes -%}
+          {%-   if n.fqdn is defined and n.fqdn | length > 0 and n.fqdn == ldap_node_fqdn_effective -%}
+          {%-   elif n.ip is defined and n.ip | length > 0 and n.ip == ldap_node_ip_effective -%}
+          {%-   else -%}
+          {%-     set ns.found = ns.found + [n] -%}
+          {%-   endif -%}
+          {%- endfor -%}
+          {{ ns.found | first | default({}) }}
+
+    - name: Override individual mirrormode vars from auto-detected nodes
+      ansible.builtin.set_fact:
+        ldap_server_id: "{{ _mirrormode_self.server_id | default(ldap_server_id) | string }}"
+        ldap_replication_peer_server_id: "{{ _mirrormode_peer.server_id | default(ldap_replication_peer_server_id) | string }}"
+        ldap_peer_fqdn: "{{ _mirrormode_peer.fqdn | default(ldap_peer_fqdn) }}"
+        ldap_peer_ip: "{{ _mirrormode_peer.ip | default(ldap_peer_ip) }}"
+        ldap_tls_certificate_src: "{{ _mirrormode_self.tls_cert_src | default(ldap_tls_certificate_src) }}"
+        ldap_tls_private_key_src: "{{ _mirrormode_self.tls_key_src | default(ldap_tls_private_key_src) }}"
+
 - name: Set derived LDAP replication URI facts
   ansible.builtin.set_fact:
     ldap_replication_uri_scheme: "{{ (ldap_replication_use_ldaps | bool) | ternary('ldaps', 'ldap') }}"
