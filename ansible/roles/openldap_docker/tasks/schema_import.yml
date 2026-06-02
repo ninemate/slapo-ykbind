@@ -2,9 +2,14 @@
 - name: Import extra schema directly with ldapadd -c
   ansible.builtin.shell: |
     set -euo pipefail
-    awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' \
-      "{{ ldap_runtime_schema_dir }}/{{ ldap_schema_import_src_path | basename }}" \
-      | docker exec -i "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// 2>&1 || true
+    infile="{{ ldap_runtime_schema_dir }}/{{ ldap_schema_import_src_path | basename }}"
+    [ -f "$infile" ] || exit 0
+    # Fix missing objectClass and write to container tmp
+    awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
+      | docker exec -i "{{ ldap_container_name }}" sh -c 'cat > /tmp/extra-schema.ldif'
+    # Import from file inside container
+    docker exec "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif 2>&1 || true
+    docker exec "{{ ldap_container_name }}" rm -f /tmp/extra-schema.ldif 2>/dev/null || true
   args:
     executable: /bin/bash
   when: ldap_schema_import_label != 'bundled-yubikey'
