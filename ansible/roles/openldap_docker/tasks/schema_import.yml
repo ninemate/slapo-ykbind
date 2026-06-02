@@ -4,8 +4,19 @@
     set -euo pipefail
     infile="{{ ldap_runtime_schema_dir }}/{{ ldap_schema_import_src_path | basename }}"
     [ -f "$infile" ] || exit 0
-    # Fix missing objectClass and write to container tmp
-    awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
+    # Strip {N} numbering, skip built-in schemas, fix missing objectClass
+    awk 'BEGIN{RS="";ORS="\n\n"} {
+      # Skip built-in schemas that already exist
+      name = ""
+      if (match($0, /^cn: ?\{[0-9]+\}?[^\n]+/)) name = substr($0, RSTART, RLENGTH)
+      else if (match($0, /^dn: cn=\{?[0-9]*\}?[^,]+/)) name = substr($0, RSTART+3, RLENGTH-3)
+      if (name ~ /^\s*(core|cosine|nis|inetorgperson|schema)\s*$/) next
+      # Strip {N} numbering from dn and cn
+      gsub(/\{([0-9]+)\}/, "", $0)
+      # Add objectClass if missing
+      if (!/objectClass:/) gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")
+      print
+    }' "$infile" \
       | docker exec -i "{{ ldap_container_name }}" sh -c 'cat > /tmp/extra-schema.ldif'
     # Import from file inside container
     docker exec "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif
