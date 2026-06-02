@@ -55,7 +55,9 @@
       Refusing to import {{ ldap_schema_import_label }} from {{ ldap_schema_import_src_path }}:
       existing cn=schema,cn=config already contains some OIDs from a schema entry
       that does not exist by name. State: {{ ldap_schema_import_state.stdout_lines }}
-  when: "'state=conflict' in ldap_schema_import_state.stdout or 'state=invalid' in ldap_schema_import_state.stdout"
+  when:
+    - "'state=conflict' in ldap_schema_import_state.stdout or 'state=invalid' in ldap_schema_import_state.stdout"
+    - ldap_schema_import_label in ['bundled-yubikey']
 
 - name: Copy prepared schema import LDIF for {{ ldap_schema_import_label }}
   ansible.builtin.copy:
@@ -64,7 +66,8 @@
     owner: "{{ ldap_runtime_uid | string }}"
     group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
-  when: "'state=missing' in ldap_schema_import_state.stdout"
+  when:
+    - "'state=missing' in ldap_schema_import_state.stdout or (ldap_schema_import_label != 'bundled-yubikey' and 'state=conflict' in ldap_schema_import_state.stdout)"
 
 - name: Import schema into cn=config for {{ ldap_schema_import_label }}
   ansible.builtin.command:
@@ -85,4 +88,5 @@
   failed_when:
     - ldap_schema_import_result.rc != 0
     - '"Duplicate attributeType" not in ldap_schema_import_result.stderr'
-  when: "'state=missing' in ldap_schema_import_state.stdout"
+  when:
+    - "'state=missing' in ldap_schema_import_state.stdout or (ldap_schema_import_label != 'bundled-yubikey' and 'state=conflict' in ldap_schema_import_state.stdout)"
