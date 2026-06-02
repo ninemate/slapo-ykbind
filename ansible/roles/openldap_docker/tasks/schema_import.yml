@@ -90,3 +90,24 @@
     - '"Duplicate attributeType" not in ldap_schema_import_result.stderr'
   when:
     - "'state=missing' in ldap_schema_import_state.stdout or (ldap_schema_import_label != 'bundled-yubikey' and 'state=conflict' in ldap_schema_import_state.stdout)"
+
+- name: Import extra schema original file to catch conflict entries
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -c
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_schema_import_src_path | basename }}"
+  register: ldap_schema_import_fallback
+  failed_when: false
+  when:
+    - ldap_schema_import_label != 'bundled-yubikey'
+    - "'state=conflict' in ldap_schema_import_state.stdout"
