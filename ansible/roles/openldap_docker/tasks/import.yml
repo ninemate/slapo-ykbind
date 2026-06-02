@@ -81,8 +81,10 @@
           'docker',
           'run',
           '--rm',
-          '--volumes-from',
-          ldap_container_name,
+          '-v', ldap_data_dir ~ ':/var/lib/ldap',
+          '-v', ldap_config_dir ~ ':/etc/ldap/slapd.d',
+          '-v', ldap_runtime_ldif_dir ~ ':' ~ ldap_container_bootstrap_dir ~ '/ldif:ro',
+          '-v', ldap_runtime_schema_dir ~ ':' ~ ldap_container_bootstrap_dir ~ '/schema:ro',
           '--entrypoint',
           'slapadd',
           ldap_image_name,
@@ -109,8 +111,12 @@
       - docker
       - run
       - --rm
-      - --volumes-from
-      - "{{ ldap_container_name }}"
+      - '-v'
+      - "{{ ldap_data_dir }}:/var/lib/ldap"
+      - '-v'
+      - "{{ ldap_config_dir }}:/etc/ldap/slapd.d"
+      - '-v'
+      - "{{ ldap_log_dir }}:/var/log/slapd"
       - --entrypoint
       - chown
       - "{{ ldap_image_name }}"
