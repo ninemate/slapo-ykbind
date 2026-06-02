@@ -73,6 +73,7 @@
       - exec
       - "{{ ldap_container_name }}"
       - ldapadd
+      - -c
       - -Q
       - -Y
       - EXTERNAL
