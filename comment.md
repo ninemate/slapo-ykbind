@@ -1,3 +1,43 @@
-TASK [openldap_docker : Smoke test FreeRADIUS config syntax inside the container] ***************************************************************************************************************************
-fatal: [v-nua.gironet.giro.hu]: FAILED! => {"changed": false, "cmd": ["docker", "exec", "freeradius-ldap", "freeradius", "-CX", "-d", "/etc/freeradius/3.0"], "delta": "0:00:00.032092", "end": "2026-06-02 14:41:19.021997", "msg": "non-zero return code", "rc": 1, "start": "2026-06-02 14:41:18.989905", "stderr": "Error response from daemon: Container 8732577fba32cd1a1f24d075970734416849ec6fe26c62597cfec98d40e8808a is restarting, wait until the container is running", "stderr_lines": ["Error response from daemon: Container 8732577fba32cd1a1f24d075970734416849ec6fe26c62597cfec98d40e8808a is restarting, wait until the container is running"], "stdout": "", "stdout_lines": []}
-fatal: [m-nua.gironet.giro.hu]: FAILED! => {"changed": false, "cmd": ["docker", "exec", "freeradius-ldap", "freeradius", "-CX", "-d", "/etc/freeradius/3.0"], "delta": "0:00:00.031138", "end": "2026-06-02 14:41:19.080133", "msg": "non-zero return code", "rc": 1, "start": "2026-06-02 14:41:19.048995", "stderr": "Error response from daemon: Container e208c669154e730d9e094cd610e3cbe9a63c918c99b2269508a9212fafd5f727 is restarting, wait until the container is running", "stderr_lines": ["Error response from daemon: Container e208c669154e730d9e094cd610e3cbe9a63c918c99b2269508a9212fafd5f727 is restarting, wait until the container is running"], "stdout": "", "stdout_lines": []}
+mkokai@v-nua:~$ sudo docker exec -i openldap-ykbind ldapadd -c -x   -D "cn=admin,dc=,dc=hu" -w ''   -H ldap://127.0.0.1:1389   -f /opt/openldap/bootstrap/ldif/imports/full-tree.ldif 2>&1   | grep -E "(already exists|undefined|violation|error|Skipping)" | head -30
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusGroupName: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+        additional info: radiusLoginService: attribute type undefined
+mkokai@v-nua:~$ sudo docker exec -i openldap-ykbind ldapadd -c -x   -D "cn=admin,dc=,dc=hu" -w ''   -H ldap://127.0.0.1:1389   -f /opt/openldap/bootstrap/ldif/imports/full-tree.filtered.ldif 2>&1   | grep -E "(already exists|undefined|violation|error|Skipping)" | head -30
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/
+config/             data/               docker-compose.yml  images/             logs/               radius/             runtime/            
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/
+ldif  schema  tls
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/ldif/
+config-imports        imports           overlay-config.ldif          replication-db-config.ldif      replication-limits-add.ldif   replication-syncprov-add.ldif
+database-config.ldif  module-load.ldif  replication-access-add.ldif  replication-global-config.ldif  replication-module-load.ldif  tls-config.ldif
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/ldif/imports/
+full-tree.ldif
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/ldif/config-imports/
+mkokai@v-nua:~$ 
