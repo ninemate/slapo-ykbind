@@ -1,43 +1,9 @@
-mkokai@v-nua:~$ sudo docker exec -i openldap-ykbind ldapadd -c -x   -D "cn=admin,dc=,dc=hu" -w ''   -H ldap://127.0.0.1:1389   -f /opt/openldap/bootstrap/ldif/imports/full-tree.ldif 2>&1   | grep -E "(already exists|undefined|violation|error|Skipping)" | head -30
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusGroupName: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-        additional info: radiusLoginService: attribute type undefined
-mkokai@v-nua:~$ sudo docker exec -i openldap-ykbind ldapadd -c -x   -D "cn=admin,dc=,dc=hu" -w ''   -H ldap://127.0.0.1:1389   -f /opt/openldap/bootstrap/ldif/imports/full-tree.filtered.ldif 2>&1   | grep -E "(already exists|undefined|violation|error|Skipping)" | head -30
-mkokai@v-nua:~$ ls /opt/openldap-ykbind/
-config/             data/               docker-compose.yml  images/             logs/               radius/             runtime/            
-mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/
-ldif  schema  tls
-mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/ldif/
-config-imports        imports           overlay-config.ldif          replication-db-config.ldif      replication-limits-add.ldif   replication-syncprov-add.ldif
-database-config.ldif  module-load.ldif  replication-access-add.ldif  replication-global-config.ldif  replication-module-load.ldif  tls-config.ldif
-mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/ldif/imports/
-full-tree.ldif
-mkokai@v-nua:~$ ls /opt/openldap-ykbind/runtime/ldif/config-imports/
-mkokai@v-nua:~$ 
+TASK [openldap_docker : Import optional extra schema LDIF files idempotently] *******************************************************************************************************************************
+included: /home/mkokai/.ansible/repo/network_auth/07-AUTOMATIZACIO/set-hvf-nua-server/ansible/roles/openldap_docker/tasks/schema_import.yml for m-nua.gironet.giro.hu, v-nua.gironet.giro.hu => (item=exports/exported-schemas.ldif)
+included: /home/mkokai/.ansible/repo/network_auth/07-AUTOMATIZACIO/set-hvf-nua-server/ansible/roles/openldap_docker/tasks/schema_import.yml for m-nua.gironet.giro.hu, v-nua.gironet.giro.hu => (item=exports/radius3.ldif)
+included: /home/mkokai/.ansible/repo/network_auth/07-AUTOMATIZACIO/set-hvf-nua-server/ansible/roles/openldap_docker/tasks/schema_import.yml for m-nua.gironet.giro.hu, v-nua.gironet.giro.hu => (item=exports/fw1auth.ldif)
+included: /home/mkokai/.ansible/repo/network_auth/07-AUTOMATIZACIO/set-hvf-nua-server/ansible/roles/openldap_docker/tasks/schema_import.yml for m-nua.gironet.giro.hu, v-nua.gironet.giro.hu => (item=exports/hvfo.ldif)
+
+TASK [openldap_docker : Import extra schema directly with ldapadd -c] ***************************************************************************************************************************************
+fatal: [m-nua.gironet.giro.hu]: FAILED! => {"changed": true, "cmd": "set -euo pipefail\ninfile=\"/opt/openldap-ykbind/runtime/schema/exported-schemas.ldif\"\n[ -f \"$infile\" ] || exit 0\n# Fix missing objectClass and write to container tmp\nawk 'BEGIN{RS=\"\";ORS=\"\\n\\n\"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\\n]*/, \"&\\nobjectClass: olcSchemaConfig\")} 1' \"$infile\"  | docker exec -i \"openldap-ykbind\" sh -c 'cat > /tmp/extra-schema.ldif'\n# Import from file inside container\ndocker exec \"openldap-ykbind\" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif\ndocker exec \"openldap-ykbind\" rm -f /tmp/extra-schema.ldif 2>/dev/null || true\n", "delta": "0:00:00.215978", "end": "2026-06-02 20:25:02.175927", "failed_when_result": true, "msg": "non-zero return code", "rc": 53, "start": "2026-06-02 20:25:01.959949", "stderr": "ldap_add: Already exists (68)\nldap_add: Already exists (68)\nldap_add: Already exists (68)\nldap_add: Already exists (68)\nldap_add: Server is unwilling to perform (53)\n\tadditional info: operation requires sibling renumbering", "stderr_lines": ["ldap_add: Already exists (68)", "ldap_add: Already exists (68)", "ldap_add: Already exists (68)", "ldap_add: Already exists (68)", "ldap_add: Server is unwilling to perform (53)", "\tadditional info: operation requires sibling renumbering"], "stdout": "adding new entry \"cn=schema,cn=config\"\n\nadding new entry \"cn={0}core,cn=schema,cn=config\"\n\nadding new entry \"cn={1}cosine,cn=schema,cn=config\"\n\nadding new entry \"cn={2}nis,cn=schema,cn=config\"\n\nadding new entry \"cn={3}inetorgperson,cn=schema,cn=config\"\n\nadding new entry \"cn={4}radius3,cn=schema,cn=config\"\n\nadding new entry \"cn={5}dyndbschema,cn=schema,cn=config\"\n\nadding new entry \"cn={6}fw1auth,cn=schema,cn=config\"\n\nadding new entry \"cn={7}hvfo,cn=schema,cn=config\"", "stdout_lines": ["adding new entry \"cn=schema,cn=config\"", "", "adding new entry \"cn={0}core,cn=schema,cn=config\"", "", "adding new entry \"cn={1}cosine,cn=schema,cn=config\"", "", "adding new entry \"cn={2}nis,cn=schema,cn=config\"", "", "adding new entry \"cn={3}inetorgperson,cn=schema,cn=config\"", "", "adding new entry \"cn={4}radius3,cn=schema,cn=config\"", "", "adding new entry \"cn={5}dyndbschema,cn=schema,cn=config\"", "", "adding new entry \"cn={6}fw1auth,cn=schema,cn=config\"", "", "adding new entry \"cn={7}hvfo,cn=schema,cn=config\""]}
+fatal: [v-nua.gironet.giro.hu]: FAILED! => {"changed": true, "cmd": "set -euo pipefail\ninfile=\"/opt/openldap-ykbind/runtime/schema/exported-schemas.ldif\"\n[ -f \"$infile\" ] || exit 0\n# Fix missing objectClass and write to container tmp\nawk 'BEGIN{RS=\"\";ORS=\"\\n\\n\"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\\n]*/, \"&\\nobjectClass: olcSchemaConfig\")} 1' \"$infile\"  | docker exec -i \"openldap-ykbind\" sh -c 'cat > /tmp/extra-schema.ldif'\n# Import from file inside container\ndocker exec \"openldap-ykbind\" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif\ndocker exec \"openldap-ykbind\" rm -f /tmp/extra-schema.ldif 2>/dev/null || true\n", "delta": "0:00:00.287932", "end": "2026-06-02 20:25:02.285579", "failed_when_result": true, "msg": "non-zero return code", "rc": 53, "start": "2026-06-02 20:25:01.997647", "stderr": "ldap_add: Already exists (68)\nldap_add: Already exists (68)\nldap_add: Already exists (68)\nldap_add: Already exists (68)\nldap_add: Server is unwilling to perform (53)\n\tadditional info: operation requires sibling renumbering", "stderr_lines": ["ldap_add: Already exists (68)", "ldap_add: Already exists (68)", "ldap_add: Already exists (68)", "ldap_add: Already exists (68)", "ldap_add: Server is unwilling to perform (53)", "\tadditional info: operation requires sibling renumbering"], "stdout": "adding new entry \"cn=schema,cn=config\"\n\nadding new entry \"cn={0}core,cn=schema,cn=config\"\n\nadding new entry \"cn={1}cosine,cn=schema,cn=config\"\n\nadding new entry \"cn={2}nis,cn=schema,cn=config\"\n\nadding new entry \"cn={3}inetorgperson,cn=schema,cn=config\"\n\nadding new entry \"cn={4}radius3,cn=schema,cn=config\"\n\nadding new entry \"cn={5}dyndbschema,cn=schema,cn=config\"\n\nadding new entry \"cn={6}fw1auth,cn=schema,cn=config\"\n\nadding new entry \"cn={7}hvfo,cn=schema,cn=config\"", "stdout_lines": ["adding new entry \"cn=schema,cn=config\"", "", "adding new entry \"cn={0}core,cn=schema,cn=config\"", "", "adding new entry \"cn={1}cosine,cn=schema,cn=config\"", "", "adding new entry \"cn={2}nis,cn=schema,cn=config\"", "", "adding new entry \"cn={3}inetorgperson,cn=schema,cn=config\"", "", "adding new entry \"cn={4}radius3,cn=schema,cn=config\"", "", "adding new entry \"cn={5}dyndbschema,cn=schema,cn=config\"", "", "adding new entry \"cn={6}fw1auth,cn=schema,cn=config\"", "", "adding new entry \"cn={7}hvfo,cn=schema,cn=config\""]}
