@@ -41,6 +41,7 @@
       b="$(basename "$infile")"
       [ "$b" = "yubikey-otp.ldif" ] && continue
       [ -f "$infile" ] || continue
+      echo "=== Importing schema: $b ==="
       # Fix missing objectClass for ldapsearch exports
       awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
         > /tmp/fixed-schema.ldif
@@ -52,7 +53,9 @@
         -F /etc/ldap/slapd.d \
         -n 0 \
         -c \
-        -l /tmp/schema.ldif 2>&1 || true
+        -l /tmp/schema.ldif 2>&1
+      rc=$?
+      echo "=== slapadd exit code: $rc ==="
       rm -f /tmp/fixed-schema.ldif
     done
   args:
