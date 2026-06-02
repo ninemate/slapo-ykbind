@@ -1,4 +1,25 @@
 ---
+- name: Import extra schema directly with ldapadd -c
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - "{{ ldap_container_name }}"
+      - ldapadd
+      - -c
+      - -Q
+      - -Y
+      - EXTERNAL
+      - -H
+      - ldapi:///
+      - -f
+      - "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_schema_import_src_path | basename }}"
+  register: ldap_schema_import_result
+  failed_when:
+    - ldap_schema_import_result.rc != 0
+    - '"Duplicate attributeType" not in ldap_schema_import_result.stderr'
+  when: ldap_schema_import_label != 'bundled-yubikey'
+
 - name: Read current cn=config schema before {{ ldap_schema_import_label }}
   ansible.builtin.command:
     argv:
@@ -21,6 +42,7 @@
       - olcObjectClasses
   register: ldap_schema_current_dump
   changed_when: false
+  when: ldap_schema_import_label == 'bundled-yubikey'
 
 - name: Store current schema dump for {{ ldap_schema_import_label }}
   ansible.builtin.copy:
@@ -29,6 +51,7 @@
     mode: "0644"
   delegate_to: localhost
   become: false
+  when: ldap_schema_import_label == 'bundled-yubikey'
 
 - name: Check schema import state for {{ ldap_schema_import_label }}
   ansible.builtin.command:
@@ -44,10 +67,12 @@
   changed_when: false
   delegate_to: localhost
   become: false
+  when: ldap_schema_import_label == 'bundled-yubikey'
 
 - name: Show schema import decision for {{ ldap_schema_import_label }}
   ansible.builtin.debug:
     msg: "{{ ldap_schema_import_state.stdout_lines }}"
+  when: ldap_schema_import_label == 'bundled-yubikey'
 
 - name: Fail on conflicting schema definitions for {{ ldap_schema_import_label }}
   ansible.builtin.fail:
@@ -56,8 +81,8 @@
       existing cn=schema,cn=config already contains some OIDs from a schema entry
       that does not exist by name. State: {{ ldap_schema_import_state.stdout_lines }}
   when:
+    - ldap_schema_import_label == 'bundled-yubikey'
     - "'state=conflict' in ldap_schema_import_state.stdout or 'state=invalid' in ldap_schema_import_state.stdout"
-    - ldap_schema_import_label in ['bundled-yubikey']
 
 - name: Copy prepared schema import LDIF for {{ ldap_schema_import_label }}
   ansible.builtin.copy:
@@ -67,7 +92,8 @@
     group: "{{ ldap_runtime_gid | string }}"
     mode: "0644"
   when:
-    - "'state=missing' in ldap_schema_import_state.stdout or (ldap_schema_import_label != 'bundled-yubikey' and 'state=conflict' in ldap_schema_import_state.stdout)"
+    - ldap_schema_import_label == 'bundled-yubikey'
+    - "'state=missing' in ldap_schema_import_state.stdout"
 
 - name: Import schema into cn=config for {{ ldap_schema_import_label }}
   ansible.builtin.command:
@@ -89,25 +115,5 @@
     - ldap_schema_import_result.rc != 0
     - '"Duplicate attributeType" not in ldap_schema_import_result.stderr'
   when:
-    - "'state=missing' in ldap_schema_import_state.stdout or (ldap_schema_import_label != 'bundled-yubikey' and 'state=conflict' in ldap_schema_import_state.stdout)"
-
-- name: Import extra schema original file to catch conflict entries
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapadd
-      - -c
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_schema_import_src_path | basename }}"
-  register: ldap_schema_import_fallback
-  failed_when: false
-  when:
-    - ldap_schema_import_label != 'bundled-yubikey'
-    - "'state=conflict' in ldap_schema_import_state.stdout"
+    - ldap_schema_import_label == 'bundled-yubikey'
+    - "'state=missing' in ldap_schema_import_state.stdout"
