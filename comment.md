@@ -1,3 +1,33 @@
-TASK [openldap_docker : Import extra schema directly with ldapadd -c] ***************************************************************************************************************************************
-fatal: [m-nua.gironet.giro.hu]: FAILED! => {"changed": true, "cmd": "set -euo pipefail\ninfile=\"/opt/openldap-ykbind/runtime/schema/radius3.ldif\"\n[ -f \"$infile\" ] || exit 0\n# Strip {N} numbering, skip built-in schemas, fix missing objectClass\nawk 'BEGIN{RS=\"\";ORS=\"\\n\\n\"} {\n  # Skip built-in schemas that already exist\n  name = \"\"\n  if (match($0, /^cn: ?\\{[0-9]+\\}?[^\\n]+/)) name = substr($0, RSTART, RLENGTH)\n  else if (match($0, /^dn: cn=\\{?[0-9]*\\}?[^,]+/)) name = substr($0, RSTART+3, RLENGTH-3)\n  if (name ~ /^\\s*(core|cosine|nis|inetorgperson|schema)\\s*$/) next\n  # Strip {N} numbering from dn and cn\n  gsub(/\\{([0-9]+)\\}/, \"\", $0)\n  # Add objectClass if missing\n  if (!/objectClass:/) gsub(/^dn:[^\\n]*/, \"&\\nobjectClass: olcSchemaConfig\")\n  print\n}' \"$infile\"  | docker exec -i \"openldap-ykbind\" sh -c 'cat > /tmp/extra-schema.ldif'\n# Import from file inside container\ndocker exec \"openldap-ykbind\" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif\ndocker exec \"openldap-ykbind\" rm -f /tmp/extra-schema.ldif 2>/dev/null || true\n", "delta": "0:00:00.226706", "end": "2026-06-02 21:46:18.413384", "failed_when_result": true, "msg": "non-zero return code", "rc": 53, "start": "2026-06-02 21:46:18.186678", "stderr": "ldap_add: Server is unwilling to perform (53)\n\tadditional info: no global superior knowledge", "stderr_lines": ["ldap_add: Server is unwilling to perform (53)", "\tadditional info: no global superior knowledge"], "stdout": "adding new entry \"cn=radius3\"", "stdout_lines": ["adding new entry \"cn=radius3\""]}
-fatal: [v-nua.gironet.giro.hu]: FAILED! => {"changed": true, "cmd": "set -euo pipefail\ninfile=\"/opt/openldap-ykbind/runtime/schema/radius3.ldif\"\n[ -f \"$infile\" ] || exit 0\n# Strip {N} numbering, skip built-in schemas, fix missing objectClass\nawk 'BEGIN{RS=\"\";ORS=\"\\n\\n\"} {\n  # Skip built-in schemas that already exist\n  name = \"\"\n  if (match($0, /^cn: ?\\{[0-9]+\\}?[^\\n]+/)) name = substr($0, RSTART, RLENGTH)\n  else if (match($0, /^dn: cn=\\{?[0-9]*\\}?[^,]+/)) name = substr($0, RSTART+3, RLENGTH-3)\n  if (name ~ /^\\s*(core|cosine|nis|inetorgperson|schema)\\s*$/) next\n  # Strip {N} numbering from dn and cn\n  gsub(/\\{([0-9]+)\\}/, \"\", $0)\n  # Add objectClass if missing\n  if (!/objectClass:/) gsub(/^dn:[^\\n]*/, \"&\\nobjectClass: olcSchemaConfig\")\n  print\n}' \"$infile\"  | docker exec -i \"openldap-ykbind\" sh -c 'cat > /tmp/extra-schema.ldif'\n# Import from file inside container\ndocker exec \"openldap-ykbind\" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif\ndocker exec \"openldap-ykbind\" rm -f /tmp/extra-schema.ldif 2>/dev/null || true\n", "delta": "0:00:00.277317", "end": "2026-06-02 21:46:18.850525", "failed_when_result": true, "msg": "non-zero return code", "rc": 53, "start": "2026-06-02 21:46:18.573208", "stderr": "ldap_add: Server is unwilling to perform (53)\n\tadditional info: no global superior knowledge", "stderr_lines": ["ldap_add: Server is unwilling to perform (53)", "\tadditional info: no global superior knowledge"], "stdout": "adding new entry \"cn=radius3\"", "stdout_lines": ["adding new entry \"cn=radius3\""]}
+slapd configuration validation failed under /etc/ldap/slapd.d
+config error processing cn=yubikey-otp,cn=schema,cn=config,cn=schema,cn=config: 
+slaptest: bad configuration directory!
+slapd configuration validation failed under /etc/ldap/slapd.d
+config error processing cn=yubikey-otp,cn=schema,cn=config,cn=schema,cn=config: 
+slaptest: bad configuration directory!
+slapd configuration validation failed under /etc/ldap/slapd.d
+config error processing cn=yubikey-otp,cn=schema,cn=config,cn=schema,cn=config: 
+slaptest: bad configuration directory!
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/
+config/             data/               docker-compose.yml  images/             logs/               radius/             runtime/            
+mkokai@v-nua:~$ ls /opt/openldap-ykbind/config/
+ls: cannot open directory '/opt/openldap-ykbind/config/': Permission denied
+mkokai@v-nua:~$ sudo ls /opt/openldap-ykbind/config/
+'cn=config'  'cn=config.ldif'
+mkokai@v-nua:~$ sudo -i
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config
+cn=config/      cn=config.ldif  
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config/
+'cn=module{0}.ldif'  'cn=schema'  'cn=schema.ldif'  'olcDatabase={0}config.ldif'  'olcDatabase={-1}frontend.ldif'  'olcDatabase={1}mdb'  'olcDatabase={1}mdb.ldif'
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config
+cn=config/      cn=config.ldif  
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config
+cn=config/      cn=config.ldif  
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config
+cn=config/      cn=config.ldif  
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config/
+cn=module{0}.ldif              cn=schema/                     cn=schema.ldif                 olcDatabase={0}config.ldif     olcDatabase={-1}frontend.ldif  olcDatabase={1}mdb/            olcDatabase={1}mdb.ldif
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config/cn\=schema/cn\=\{
+cn={0}core.ldif                 cn={1}cosine.ldif               cn={2}cn=yubikey-otp.ldif       cn={3}inetorgperson.ldif        cn={5}cn={3}inetorgperson.ldif  cn={6}hvfo.ldif                 cn={9}cn={7}hvfo.ldif
+cn={1}cn=schema.ldif            cn={1}extra-1.ldif              cn={2}nis.ldif                  cn={4}cn={2}nis.ldif            cn={5}dyndbschema.ldif          cn={7}cn={5}dyndbschema.ldif    
+cn={1}cn=yubikey-otp.ldif       cn={2}cn={0}core.ldif           cn={3}cn={1}cosine.ldif         cn={4}yubikey-otp.ldif          cn={6}cn={4}radius3.ldif        cn={8}cn={6}fw1auth.ldif        
+root@v-nua:~# ls /opt/openldap-ykbind/config/cn\=config/cn\=schema/cn\=\{
