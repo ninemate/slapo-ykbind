@@ -35,6 +35,26 @@ ldap_additional_schema_ldifs:
 
 Ne legyen benne `exported-schemas.ldif` — az teljes cn=config dump, built-in-ekkel és hibás OID-okkal, ami csak problémát okoz.
 
+**Ha a radius3.ldif-ben `myRadiusFlag:1`-szerű OID makrók vannak**, exportáld a makró definíciókat is:
+
+```bash
+# Régi LDAP-on: OID makrók exportálása
+sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+  -b "cn=config" "(olcObjectIdentifier=*)" dn olcObjectIdentifier \
+  > exports/radius-oid-macros.ldif
+```
+
+És tedd BELE a listába, a radius3 ELÉ:
+
+```yaml
+ldap_additional_schema_ldifs:
+  - exports/radius-oid-macros.ldif    # ← makrók előbb
+  - exports/radius3.ldif
+  - exports/dyndbschema.ldif
+  - exports/fw1auth.ldif
+  - exports/hvfo.ldif
+```
+
 ## 2. Teljes cleanup mindkét VM-en
 
 ```bash
