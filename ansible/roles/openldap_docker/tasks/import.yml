@@ -34,45 +34,26 @@
     name: "{{ ldap_systemd_service_name }}"
     state: stopped
 
-- name: Write extra schema files directly to slapd.d config directory
+- name: Import extra schemas into config DB with slapadd -n 0
   ansible.builtin.shell: |
     set -euo pipefail
-    schema_dir="{{ ldap_config_dir }}/cn=config/cn=schema"
-    [ -d "$schema_dir" ] || exit 0
-    # Find next available slot number
-    next_n=0
-    for f in "$schema_dir"/cn={*}.ldif; do
-      [ -f "$f" ] || continue
-      n="${f##*cn=\{}"; n="${n%%\}*}"
-      [ "$n" -gt "$next_n" ] 2>/dev/null && next_n="$n"
-    done
-    next_n=$((next_n + 1))
-    # Process each extra schema file
     for infile in "{{ ldap_runtime_schema_dir }}"/*.ldif; do
       b="$(basename "$infile")"
       [ "$b" = "yubikey-otp.ldif" ] && continue
       [ -f "$infile" ] || continue
-      awk -v n="$next_n" '
-      BEGIN { RS=""; ORS="\n\n" }
-      {
-        # Extract schema name from cn or dn
-        name = ""
-        if (match($0, /^cn:[ \t]*\{[0-9]+\}?([^\n]+)/)) name = substr($0, RSTART+3, RLENGTH-3)
-        else if (match($0, /^dn: cn=\{?[0-9]*\}?([^,]+)/)) name = substr($0, RSTART+3, RLENGTH-3)
-        gsub(/^\{[0-9]+\}/, "", name)
-        gsub(/,.*/, "", name)
-        gsub(/^[ \t]+|[ \t]+$/, "", name)
-        if (name ~ /^(core|cosine|nis|inetorgperson|schema)$/) next
-        if (length(name) == 0) name = "extra-" n
-        # Add objectClass if missing
-        if (!/objectClass:/) gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")
-        # Replace {N} with new number in dn/cn
-        gsub(/\{[0-9]+\}/, "{" n "}", $0)
-        # Write to slapd.d schema directory
-        outfile = "'"$schema_dir"'/cn={" n "}" name ".ldif"
-        print > outfile
-        n++
-      }' "$infile"
+      # Fix missing objectClass for ldapsearch exports
+      awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
+        > /tmp/fixed-schema.ldif
+      docker run --rm \
+        -v "{{ ldap_config_dir }}:/etc/ldap/slapd.d" \
+        -v /tmp/fixed-schema.ldif:/tmp/schema.ldif:ro \
+        --entrypoint slapadd \
+        "{{ ldap_image_name }}" \
+        -F /etc/ldap/slapd.d \
+        -n 0 \
+        -c \
+        -l /tmp/schema.ldif 2>&1 || true
+      rm -f /tmp/fixed-schema.ldif
     done
   args:
     executable: /bin/bash
