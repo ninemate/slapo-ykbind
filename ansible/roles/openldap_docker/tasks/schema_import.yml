@@ -8,10 +8,14 @@
     awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
       | docker exec -i "{{ ldap_container_name }}" sh -c 'cat > /tmp/extra-schema.ldif'
     # Import from file inside container
-    docker exec "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif 2>&1 || true
+    docker exec "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif
     docker exec "{{ ldap_container_name }}" rm -f /tmp/extra-schema.ldif 2>/dev/null || true
   args:
     executable: /bin/bash
+  register: ldap_extra_schema_result
+  failed_when:
+    - ldap_extra_schema_result.rc != 0
+    - '"Duplicate attributeType" not in ldap_extra_schema_result.stderr'
   when: ldap_schema_import_label != 'bundled-yubikey'
 
 - name: Read current cn=config schema before {{ ldap_schema_import_label }}
