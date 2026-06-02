@@ -44,7 +44,36 @@ sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
   > exports/radius-oid-macros.ldif
 ```
 
-És tedd BELE a listába, a radius3 ELÉ:
+## 2. Ellenőrizd a hiányzó schema-kat és exportáld őket
+
+```bash
+# Régi LDAP-on: listázd az összes schema-t
+sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+  -b "cn=schema,cn=config" "(objectClass=olcSchemaConfig)" cn \
+  | grep "^cn:" | sort
+
+# Az új LDAP-on is futtasd ugyanezt, és hasonlítsd össze.
+# Ami a régiben van de az újban nincs, exportáld:
+for s in ppolicy; do
+  sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+    -b "cn=schema,cn=config" "(cn=*$s*)" \
+    dn cn objectClass olcAttributeTypes olcObjectClasses \
+    > exports/$s.ldif
+done
+```
+
+A hiányzó schema fájlokat tedd be a vars listába a többi közé.
+
+## 3. OID makrók exportálása (ha szükséges)
+
+```bash
+# Régi LDAP-on: OID makrók exportálása
+sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+  -b "cn=config" "(olcObjectIdentifier=*)" dn olcObjectIdentifier \
+  > exports/radius-oid-macros.ldif
+```
+
+Tedd BELE a listába, a radius3 ELÉ:
 
 ```yaml
 ldap_additional_schema_ldifs:
@@ -55,7 +84,7 @@ ldap_additional_schema_ldifs:
   - exports/hvfo.ldif
 ```
 
-## 2. Teljes cleanup mindkét VM-en
+## 4. Teljes cleanup mindkét VM-en
 
 ```bash
 # VM1-en és VM2-n:
@@ -66,7 +95,7 @@ rm -rf /opt/openldap-ykbind
 docker container prune -f
 ```
 
-## 3. full_import futtatása
+## 5. full_import futtatása
 
 ```bash
 cd release-bundle/repo/ansible
@@ -83,7 +112,7 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -Kk
 ```
 
-## 4. Diagnosztika: ldapadd import kimenet ellenőrzése
+## 6. Diagnosztika: ldapadd import kimenet ellenőrzése
 
 Ha a full_import után csak bizonyos OU-k populálódtak, futtasd a VM-en:
 
@@ -97,25 +126,7 @@ docker exec -i openldap-ykbind ldapadd -c -x \
 
 Cseréld ki a `dc=...`-t és a jelszót. A kimenet megmutatja, hogy pontosan mely entry-k és miért maradtak ki.
 
-## 5. Hiányzó schema definíciók felkutatása a régi LDAP-on
-
-Ha az ldapadd `radiusLoginService` vagy `radiusGroupName` undefined hibát ad, a régi LDAP valószínűleg flat `.schema` fájlból tölti ezeket. Régi LDAP-on futtasd:
-
-```bash
-# 1. Keresés a schema könyvtárakban
-grep -r "radiusGroupName" /etc/ldap/schema/ /etc/freeradius/ 2>/dev/null
-
-# 2. Keresés a teljes fájlrendszerben
-find / -name "*.schema" -o -name "*.ldif" 2>/dev/null \
-  | xargs grep -l "radiusGroupName\|radiusLoginService" 2>/dev/null
-
-# 3. Ellenőrzés cn=config-ban (ha slapd.conf helyett cn=config van)
-ls -la /etc/ldap/slapd.d/cn=config/cn=schema/
-```
-
-Ha megtaláltad a `.schema` fájlt, másold át a control node `repo/exports/`-ba, és adjuk hozzá `ldap_additional_schema_ldifs`-hez (át kell konvertálni LDIF-be).
-
-## 6. Ha a teljes image rebuild kell
+## 7. Ha a teljes image rebuild kell
 
 Build gépen:
 
