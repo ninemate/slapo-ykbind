@@ -81,4 +81,8 @@
       - ldapi:///
       - -f
       - "{{ ldap_container_bootstrap_dir }}/schema/schema-import-{{ ldap_schema_import_label | lower | regex_replace('[^a-z0-9]+', '-') }}.ldif"
+  register: ldap_schema_import_result
+  failed_when:
+    - ldap_schema_import_result.rc != 0
+    - '"Duplicate attributeType" not in ldap_schema_import_result.stderr'
   when: "'state=missing' in ldap_schema_import_state.stdout"
