@@ -43,11 +43,7 @@
       [ "$b" = "exported-schemas.ldif" ] && echo "Skipping $b (full cn=config dump, not a schema)" && continue
       [ -f "$infile" ] || continue
       echo "=== Importing schema: $b ==="
-      awk 'BEGIN{RS="";ORS="\n\n"} {
-        if (!/objectClass:/) gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")
-        # Remove olcAttributeTypes lines with non-numeric OIDs (e.g. myRadiusFlag:1)
-        gsub(/\n?olcAttributeTypes: [^\(]*\([ \t]*[a-zA-Z][^)]*\)[^\n]*/, "")
-      } 1' "$infile" \
+      awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
         > /tmp/fixed-schema.ldif
       docker run --rm \
         -v "{{ ldap_config_dir }}:/etc/ldap/slapd.d" \
