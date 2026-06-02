@@ -71,7 +71,29 @@ ansible-playbook ... -e ldap_deploy_mode=adopt_existing ...
 
 Utána `maintenance` mód a module/overlay beállításához (de ez újra meghívja a schema importot — szóval csak a workaround után).
 
-## 5. Ha a teljes image rebuild kell
+## 5. Hiányzó schema-k exportálása a régi LDAP-ról
+
+A `full-tree.ldif` tartalmazhat olyan attribútumokat (pl. `radiusLoginService`) amik nincsenek a standard OpenLDAP schema-k között. Ezeket a régi LDAP-ról kell exportálni.
+
+```bash
+# Régi LDAP-on: dump all non-built-in schemas
+ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+  -b "cn=schema,cn=config" "(objectClass=olcSchemaConfig)" \
+  dn olcAttributeTypes olcObjectClasses \
+  | awk 'BEGIN{RS="";ORS="\n\n"} !/cn=\{0\}(core|cosine|nis|inetorgperson|displaymail)/' \
+  > exports/exported-schemas.ldif
+```
+
+A vars fájlba add hozzá:
+
+```yaml
+ldap_additional_schema_ldifs:
+  - exports/exported-schemas.ldif
+```
+
+Így a configure.yml betölti őket az slapadd előtt.
+
+## 6. Ha a teljes image rebuild kell
 
 Build gépen:
 
