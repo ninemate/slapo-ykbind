@@ -58,6 +58,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_build | bool and ldap_skip_local_save | bool)
 
 - name: Check whether the local image already exists on control node
   ansible.builtin.command:
@@ -72,13 +73,35 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_build | bool and ldap_skip_local_save | bool)
+
+- name: Check whether local image archive exists for bundle deploy
+  ansible.builtin.stat:
+    path: "{{ ldap_local_image_archive }}"
+  register: ldap_local_bundle_archive_check
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - ldap_skip_local_build | bool
+    - ldap_skip_local_save | bool
 
 - name: Fail when local build is skipped but image is missing
   ansible.builtin.fail:
-    msg: "A ldap_skip_local_build=true, de a lokális image nem létezik: {{ ldap_image_name }}"
+    msg: "ldap_skip_local_build=true, de a lokális image nem létezik: {{ ldap_image_name }}"
   when:
     - ldap_skip_local_build | bool
+    - not (ldap_skip_local_save | bool)
     - ldap_local_existing_image_check.rc != 0
+  run_once: true
+
+- name: Fail when bundle archive is missing
+  ansible.builtin.fail:
+    msg: "ldap_skip_local_build=true és ldap_skip_local_save=true, de a tar archívum nem létezik: {{ ldap_local_image_archive }}"
+  when:
+    - ldap_skip_local_build | bool
+    - ldap_skip_local_save | bool
+    - not (ldap_local_bundle_archive_check.stat.exists | default(false))
   run_once: true
 
 - name: Announce local image build skip
@@ -86,7 +109,17 @@
     msg: "Skipping local docker build because ldap_skip_local_build=true and image {{ ldap_image_name }} already exists."
   when:
     - ldap_skip_local_build | bool
+    - not (ldap_skip_local_save | bool)
     - ldap_local_existing_image_check.rc == 0
+  run_once: true
+
+- name: Announce bundle deploy mode
+  ansible.builtin.debug:
+    msg: "Bundle deploy: using prebuilt archive {{ ldap_local_image_archive }}."
+  when:
+    - ldap_skip_local_build | bool
+    - ldap_skip_local_save | bool
+    - ldap_local_bundle_archive_check.stat.exists | default(false)
   run_once: true
 
 - name: Remove previous local docker build log
@@ -155,6 +188,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (ldap_skip_local_save | bool)
 
 - name: Fail when local save is skipped but archive is missing
   ansible.builtin.stat:

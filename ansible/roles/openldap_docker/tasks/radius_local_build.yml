@@ -44,13 +44,44 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: not (radius_skip_local_build | bool and radius_skip_local_save | bool)
+
+- name: Check whether local RADIUS image archive exists for bundle deploy
+  ansible.builtin.stat:
+    path: "{{ radius_local_image_archive }}"
+  register: radius_local_bundle_archive_check
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - radius_skip_local_build | bool
+    - radius_skip_local_save | bool
 
 - name: Fail when local RADIUS build is skipped but image is missing
   ansible.builtin.fail:
     msg: "radius_skip_local_build=true, but the local image does not exist: {{ radius_image_name }}"
   when:
     - radius_skip_local_build | bool
+    - not (radius_skip_local_save | bool)
     - radius_local_existing_image_check.rc != 0
+  run_once: true
+
+- name: Fail when RADIUS bundle archive is missing
+  ansible.builtin.fail:
+    msg: "radius_skip_local_build=true and radius_skip_local_save=true, but the tar archive does not exist: {{ radius_local_image_archive }}"
+  when:
+    - radius_skip_local_build | bool
+    - radius_skip_local_save | bool
+    - not (radius_local_bundle_archive_check.stat.exists | default(false))
+  run_once: true
+
+- name: Announce RADIUS bundle deploy mode
+  ansible.builtin.debug:
+    msg: "RADIUS bundle deploy: using prebuilt archive {{ radius_local_image_archive }}."
+  when:
+    - radius_skip_local_build | bool
+    - radius_skip_local_save | bool
+    - radius_local_bundle_archive_check.stat.exists | default(false)
   run_once: true
 
 - name: Remove previous local RADIUS docker build log
