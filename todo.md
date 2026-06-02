@@ -1,48 +1,87 @@
-# Deploy TODO
+# Deploy TODO — exact commands
 
-## 1. Image contains baked-in yubikey schema
+## 0. Prerequisites
 
-A `full_import` a schema importnál elbukik: a yubikey OID-k már a bootstrap után is bent vannak a `cn=config`-ban (`cn={4}yubikey-otp`). Ez azt jelenti, hogy a használt Docker image tartalmazza a schemát az entrypoint/bootstrap által.
+Control node-on: Docker CLI + user a `docker` csoportban. Bundle kibontva: `release-bundle/repo/` és `release-bundle/images/`.
 
-**Megoldási lehetőségek:**
+## 1. Teljes cleanup mindkét VM-en
 
-- **a)** Rebuildeli az image-et a jelenlegi Dockerfile-ból (ami NEM importálja a schemát), exportálni tar-ba, bundle-t frissíteni, és újra `full_import`
-- **b)** Kitörölni a schemát a `cn=config`-ból, majd `full_import` újrafuttatása (ldd az előző üzenetet)
+```bash
+# VM1-en és VM2-n:
+systemctl stop openldap-ykbind-compose 2>/dev/null
+systemctl disable openldap-ykbind-compose 2>/dev/null
+docker rm -f openldap-ykbind freeradius-ldap 2>/dev/null
+rm -rf /opt/openldap-ykbind
+docker container prune -f
+```
 
-## 2. Check-schema-ldif-state.sh bug
+## 2. Schema kitörlése (ha mégis bent maradt)
 
-A script `state=missing`-et ad vissza amikor a schema OID-k már bent vannak a `cn=config`-ban, csak `cn={4}yubikey-otp` néven. Ezért próbál ldapadd-olni → duplicate error.
+```bash
+# VM1-en és VM2-n, container futása után:
+SCHEMA_DN=$(docker exec openldap-ykbind ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// \
+  -b cn=schema,cn=config "(olcAttributeTypes=*55555*)" dn 2>/dev/null | grep ^dn: | head -1)
+if [ -n "$SCHEMA_DN" ]; then
+  docker exec openldap-ykbind ldapdelete -Q -Y EXTERNAL -H ldapi:/// "$SCHEMA_DN"
+  echo "törölve: $SCHEMA_DN"
+else
+  echo "nincs 55555-ös schema"
+fi
+```
 
-**Valószínű ok:** a script `extract_oids` függvénye vagy az `unfold_ldif` nem dolgozza fel helyesen a bent lévő schema dump-ot.
+## 3. full_import futtatása
 
-## 3. Bundle deploy: control node Docker
+```bash
+cd release-bundle/repo/ansible
+ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
+  -e @../vars/production.yml \
+  -e ldap_deploy_mode=full_import \
+  -e ldap_ldif_import_file=exports/full-tree.ldif \
+  -e ldap_skip_local_build=true \
+  -e ldap_skip_local_save=true \
+  -e radius_skip_local_build=true \
+  -e radius_skip_local_save=true \
+  -e ldap_local_image_archive=$PWD/../images/openldap-ykbind_latest.tar \
+  -e radius_local_image_archive=$PWD/../images/freeradius-ldap_latest.tar \
+  -Kk
+```
 
-Két módosítás készült a bundle deploy támogatásához Docker nélküli control node-on:
+## 4. Ha a schema import továbbra is duplicate-ot dob
 
-- `local_build.yml` — Docker check-ek átugrása ha `ldap_skip_local_build=true && ldap_skip_local_save=true`
-- `radius_local_build.yml` — ugyanez a RADIUS oldalra
+A schema OID-k már bootstrap után is bent vannak az image-ben. Workaround: a `schema_import.yml` check scriptje nem ismeri fel a meglévő OID-kat, ezért újra akarja importálni.
 
-## 4. Systemd hardening
+**Ideiglenes workaround** — a configure.yml schema import részének kihagyása:
 
-A compose systemd unit-ból kivettük a runc-val ütköző hardening direktívákat:
+```bash
+# Control node-on: ideiglenesen átnevezni a schema LDIF-et, hogy ne találja meg
+mv release-bundle/repo/schema/yubikey-otp.ldif release-bundle/repo/schema/yubikey-otp.ldif.bak
 
-- `MemoryDenyWriteExecute=yes`
-- `PrivateDevices=yes`
-- `ProtectKernelModules=yes`
-- `ProtectControlGroups=yes`
-- `ProtectHostname=yes`
-- `LockPersonality=yes`
-- `SystemCallArchitectures=native`
+# full_import futtatása (configure.yml sikeresen átugorja a schema importot)
+ansible-playbook ... -e ldap_deploy_mode=full_import ...
 
-## 5. TLS cert IP vs FQDN
+# Utána vissza
+mv release-bundle/repo/schema/yubikey-otp.ldif.bak release-bundle/repo/schema/yubikey-otp.ldif
+```
 
-Mirrormode-ban ha a TLS cert only FQDN-re érvényes, akkor az `ldap_mirrormode_nodes` listában az `fqdn` mezőt kell használni. A replikációs URI abból képződik.
+**VAGY** — `adopt_existing` mód, ami kihagyja a configure.yml-t (schema, module, overlay nem állítódik be):
 
-## 6. RADIUS dynamic_clients ipaddr
+```bash
+ansible-playbook ... -e ldap_deploy_mode=adopt_existing ...
+```
 
-A `radius_dynamic_client_networks` listában `ipaddr` a field neve, nem `ip`.
+Utána `maintenance` mód a module/overlay beállításához (de ez újra meghívja a schema importot — szóval csak a workaround után).
 
-## 7. Adopt_existing utáni teendők
+## 5. Ha a teljes image rebuild kell
 
-- `full_import` helyett `adopt_existing` futtatása ha a config/data már bent van
-- Ha kell module/overlay beállítás, utána `maintenance` mód
+Build gépen:
+
+```bash
+cd ~/slapo-ykbind
+git checkout main
+git pull
+docker build -t openldap-ykbind:latest -f docker/openldap/Dockerfile .
+docker build -t freeradius-ldap:latest -f docker/freeradius/Dockerfile .
+./tools/create-release-bundle.sh
+```
+
+Aztán a friss bundle-t átmásolni a control node-ra, cleanup, full_import.
