@@ -51,7 +51,21 @@ ansible-playbook -i inventory/hosts.ini playbooks/deploy-openldap.yml \
   -Kk
 ```
 
-## 4. Ha a teljes image rebuild kell
+## 4. Diagnosztika: ldapadd import kimenet ellenőrzése
+
+Ha a full_import után csak bizonyos OU-k populálódtak, futtasd a VM-en:
+
+```bash
+docker exec -i openldap-ykbind ldapadd -c -x \
+  -D "cn=admin,dc=..." -w '...' \
+  -H ldap://127.0.0.1:1389 \
+  -f /opt/openldap/bootstrap/ldif/imports/full-tree.ldif 2>&1 \
+  | grep -E "(already exists|undefined|violation|error|Skipping)" | head -30
+```
+
+Cseréld ki a `dc=...`-t és a jelszót. A kimenet megmutatja, hogy pontosan mely entry-k és miért maradtak ki.
+
+## 5. Ha a teljes image rebuild kell
 
 Build gépen:
 
