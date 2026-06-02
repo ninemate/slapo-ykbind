@@ -4,24 +4,36 @@
 
 Control node-on: Docker CLI + user a `docker` csoportban. Bundle kibontva: `release-bundle/repo/` és `release-bundle/images/`.
 
-## 1. Export ALL schemas from the old LDAP (egyszer, a régi gépen)
+## 1. Export custom schemas from the old LDAP (egyszer, a régi gépen)
+
+Egyenként exportáld a nem-built-in schema-kat. A built-in-ek (core, cosine, nis, inetorgperson) és a full cn=config dump NE kerüljön a listába.
 
 ```bash
-# Régi LDAP-on: export ALL schemas (including built-in ones)
-# A check script úgyis kiszűri a már meglévőket.
+# Régi LDAP-on: listázd a nem-built-in schema-kat
 sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
-  -b "cn=schema,cn=config" "(objectClass=olcSchemaConfig)" \
-  dn cn objectClass olcAttributeTypes olcObjectClasses \
-  > exports/exported-schemas.ldif
+  -b "cn=schema,cn=config" "(objectClass=olcSchemaConfig)" cn
+
+# Exportáld a custom schema-kat egyenként (példa):
+for s in radius3 dyndbschema fw1auth hvfo; do
+  sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
+    -b "cn=schema,cn=config" "(cn=*$s*)" \
+    dn cn objectClass olcAttributeTypes olcObjectClasses \
+    > exports/$s.ldif
+done
 ```
 
-A vars fájlba:
+A vars fájlba CSAK ezek kerüljenek:
 
 ```yaml
 # production.yml
 ldap_additional_schema_ldifs:
-  - exports/exported-schemas.ldif
+  - exports/radius3.ldif
+  - exports/dyndbschema.ldif
+  - exports/fw1auth.ldif
+  - exports/hvfo.ldif
 ```
+
+Ne legyen benne `exported-schemas.ldif` — az teljes cn=config dump, built-in-ekkel és hibás OID-okkal, ami csak problémát okoz.
 
 ## 2. Teljes cleanup mindkét VM-en
 
