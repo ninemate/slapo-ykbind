@@ -36,13 +36,13 @@
 
 - name: Import extra schemas into config DB with slapadd -n 0
   ansible.builtin.shell: |
-    set -euo pipefail
+    set +e
     for infile in "{{ ldap_runtime_schema_dir }}"/*.ldif; do
       b="$(basename "$infile")"
       [ "$b" = "yubikey-otp.ldif" ] && continue
+      [ "$b" = "exported-schemas.ldif" ] && echo "Skipping $b (full cn=config dump, not a schema)" && continue
       [ -f "$infile" ] || continue
       echo "=== Importing schema: $b ==="
-      # Fix missing objectClass for ldapsearch exports
       awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$infile" \
         > /tmp/fixed-schema.ldif
       docker run --rm \
@@ -54,10 +54,10 @@
         -n 0 \
         -c \
         -l /tmp/schema.ldif 2>&1
-      rc=$?
-      echo "=== slapadd exit code: $rc ==="
+      echo "=== exit code: $? ==="
       rm -f /tmp/fixed-schema.ldif
     done
+    set -e
   args:
     executable: /bin/bash
   when: ldap_additional_schema_ldifs | length > 0
