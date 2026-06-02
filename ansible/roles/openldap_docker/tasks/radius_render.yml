@@ -224,6 +224,31 @@
     - radius_mount_inner_tunnel_site | bool
     - radius_sites_available_inner_tunnel_src_path | length == 0
 
+- name: Create dictionary.d directory for custom RADIUS attributes
+  ansible.builtin.file:
+    path: "{{ radius_config_dir }}/dictionary.d"
+    state: directory
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0755"
+  when: not (radius_use_full_config_tree | bool)
+
+- name: Deploy YubiKey dictionary for YubiKey-Nas-Bypass attribute
+  ansible.builtin.copy:
+    content: |
+      #
+      # YubiKey NAS Bypass attribute for FreeRADIUS
+      #
+      ATTRIBUTE YubiKey-Nas-Bypass 0 boolean
+    dest: "{{ radius_config_dir }}/dictionary.d/yubikey"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_yubikey_dict_copy
+  when:
+    - not (radius_use_full_config_tree | bool)
+    - radius_yubikey_nas_bypass_enabled | bool
+
 - name: Store RADIUS config change state
   ansible.builtin.set_fact:
     radius_config_changed: >-
@@ -242,4 +267,5 @@
         or (radius_default_site_template.changed | default(false))
         or (radius_inner_tunnel_site_copy.changed | default(false))
         or (radius_inner_tunnel_site_template.changed | default(false))
+        or (radius_yubikey_dict_copy.changed | default(false))
       }}
