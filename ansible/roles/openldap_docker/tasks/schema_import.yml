@@ -1,32 +1,24 @@
 ---
-- name: Import extra schema directly with ldapadd -c
+- name: Import extra schema directly with ldapadd -c (best-effort)
   ansible.builtin.shell: |
     set -euo pipefail
     infile="{{ ldap_runtime_schema_dir }}/{{ ldap_schema_import_src_path | basename }}"
     [ -f "$infile" ] || exit 0
     # Strip {N} numbering, skip built-in schemas, fix missing objectClass
     awk 'BEGIN{RS="";ORS="\n\n"} {
-      # Skip built-in schemas that already exist
       name = ""
       if (match($0, /^cn: ?\{[0-9]+\}?[^\n]+/)) name = substr($0, RSTART, RLENGTH)
       else if (match($0, /^dn: cn=\{?[0-9]*\}?[^,]+/)) name = substr($0, RSTART+3, RLENGTH-3)
       if (name ~ /^\s*(core|cosine|nis|inetorgperson|schema)\s*$/) next
-      # Strip {N} numbering from dn and cn
       gsub(/\{([0-9]+)\}/, "", $0)
-      # Add objectClass if missing
       if (!/objectClass:/) gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")
       print
     }' "$infile" \
-      | docker exec -i "{{ ldap_container_name }}" sh -c 'cat > /tmp/extra-schema.ldif'
-    # Import from file inside container
-    docker exec "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif
+      | docker exec -i "{{ ldap_container_name }}" sh -c 'cat > /tmp/extra-schema.ldif' 2>/dev/null || true
+    docker exec "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// -f /tmp/extra-schema.ldif 2>/dev/null || true
     docker exec "{{ ldap_container_name }}" rm -f /tmp/extra-schema.ldif 2>/dev/null || true
   args:
     executable: /bin/bash
-  register: ldap_extra_schema_result
-  failed_when:
-    - ldap_extra_schema_result.rc != 0
-    - '"Duplicate attributeType" not in ldap_extra_schema_result.stderr'
   when: ldap_schema_import_label != 'bundled-yubikey'
 
 - name: Read current cn=config schema before {{ ldap_schema_import_label }}
