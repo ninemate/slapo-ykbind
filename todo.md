@@ -65,7 +65,25 @@ docker exec -i openldap-ykbind ldapadd -c -x \
 
 Cseréld ki a `dc=...`-t és a jelszót. A kimenet megmutatja, hogy pontosan mely entry-k és miért maradtak ki.
 
-## 5. Ha a teljes image rebuild kell
+## 5. Hiányzó schema definíciók felkutatása a régi LDAP-on
+
+Ha az ldapadd `radiusLoginService` vagy `radiusGroupName` undefined hibát ad, a régi LDAP valószínűleg flat `.schema` fájlból tölti ezeket. Régi LDAP-on futtasd:
+
+```bash
+# 1. Keresés a schema könyvtárakban
+grep -r "radiusGroupName" /etc/ldap/schema/ /etc/freeradius/ 2>/dev/null
+
+# 2. Keresés a teljes fájlrendszerben
+find / -name "*.schema" -o -name "*.ldif" 2>/dev/null \
+  | xargs grep -l "radiusGroupName\|radiusLoginService" 2>/dev/null
+
+# 3. Ellenőrzés cn=config-ban (ha slapd.conf helyett cn=config van)
+ls -la /etc/ldap/slapd.d/cn=config/cn=schema/
+```
+
+Ha megtaláltad a `.schema` fájlt, másold át a control node `repo/exports/`-ba, és adjuk hozzá `ldap_additional_schema_ldifs`-hez (át kell konvertálni LDIF-be).
+
+## 6. Ha a teljes image rebuild kell
 
 Build gépen:
 
