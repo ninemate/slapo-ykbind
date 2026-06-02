@@ -1,21 +1,12 @@
 ---
 - name: Import extra schema directly with ldapadd -c
-  ansible.builtin.command:
-    argv:
-      - docker
-      - exec
-      - "{{ ldap_container_name }}"
-      - ldapadd
-      - -c
-      - -Q
-      - -Y
-      - EXTERNAL
-      - -H
-      - ldapi:///
-      - -f
-      - "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_schema_import_src_path | basename }}"
-  register: ldap_schema_import_result
-  failed_when: false
+  ansible.builtin.shell: |
+    set -euo pipefail
+    awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' \
+      "{{ ldap_runtime_schema_dir }}/{{ ldap_schema_import_src_path | basename }}" \
+      | docker exec -i "{{ ldap_container_name }}" ldapadd -c -Q -Y EXTERNAL -H ldapi:/// 2>&1 || true
+  args:
+    executable: /bin/bash
   when: ldap_schema_import_label != 'bundled-yubikey'
 
 - name: Read current cn=config schema before {{ ldap_schema_import_label }}
