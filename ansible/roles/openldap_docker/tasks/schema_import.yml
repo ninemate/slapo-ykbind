@@ -15,9 +15,7 @@
       - -f
       - "{{ ldap_container_bootstrap_dir }}/schema/{{ ldap_schema_import_src_path | basename }}"
   register: ldap_schema_import_result
-  failed_when:
-    - ldap_schema_import_result.rc != 0
-    - '"Duplicate attributeType" not in ldap_schema_import_result.stderr'
+  failed_when: false
   when: ldap_schema_import_label != 'bundled-yubikey'
 
 - name: Read current cn=config schema before {{ ldap_schema_import_label }}

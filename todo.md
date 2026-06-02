@@ -11,7 +11,7 @@ Control node-on: Docker CLI + user a `docker` csoportban. Bundle kibontva: `rele
 # A check script úgyis kiszűri a már meglévőket.
 sudo ldapsearch -Q -Y EXTERNAL -H ldapi:/// -LLL -o ldif-wrap=no \
   -b "cn=schema,cn=config" "(objectClass=olcSchemaConfig)" \
-  dn olcAttributeTypes olcObjectClasses \
+  dn cn objectClass olcAttributeTypes olcObjectClasses \
   > exports/exported-schemas.ldif
 ```
 
