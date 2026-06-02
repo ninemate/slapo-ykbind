@@ -73,6 +73,33 @@
     name: "{{ ldap_systemd_service_name }}"
     state: stopped
 
+- name: Import extra schema LDIFs directly into slapd config with slapadd -n 0
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for f in "{{ ldap_runtime_schema_dir }}"/*.ldif; do
+      [ -f "$f" ] || continue
+      b="$(basename "$f")"
+      # Skip bundled yubikey schema (already handled by configure.yml)
+      [ "$b" = "yubikey-otp.ldif" ] && continue
+      echo "Importing extra schema: $f"
+      # Fix missing objectClass for ldapsearch exports that lack it
+      awk 'BEGIN{RS="";ORS="\n\n"} /^dn:/ && !/objectClass:/ {gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")} 1' "$f" \
+        > "/tmp/fixed-${b}"
+      docker run --rm \
+        -v "{{ ldap_config_dir }}:/etc/ldap/slapd.d" \
+        -v "/tmp/fixed-${b}:/tmp/schema.ldif:ro" \
+        --entrypoint slapadd \
+        "{{ ldap_image_name }}" \
+        -F /etc/ldap/slapd.d \
+        -n 0 \
+        -c \
+        -l /tmp/schema.ldif 2>&1 || true
+      rm -f "/tmp/fixed-${b}"
+    done
+  args:
+    executable: /bin/bash
+  when: ldap_additional_schema_ldifs | length > 0
+
 - name: Build offline slapadd command line
   ansible.builtin.set_fact:
     ldap_offline_slapadd_argv: >-
