@@ -46,7 +46,7 @@
       awk 'BEGIN{RS="";ORS="\n\n"} {
         if (!/objectClass:/) gsub(/^dn:[^\n]*/, "&\nobjectClass: olcSchemaConfig")
         # Remove olcAttributeTypes lines with non-numeric OIDs (e.g. myRadiusFlag:1)
-        gsub(/\n?olcAttributeTypes: [^\n]*\([ \t]*[a-zA-Z][^)]*\)[^\n]*/, "")
+        gsub(/\n?olcAttributeTypes: [^\(]*\([ \t]*[a-zA-Z][^)]*\)[^\n]*/, "")
       } 1' "$infile" \
         > /tmp/fixed-schema.ldif
       docker run --rm \
