@@ -224,6 +224,33 @@
     - radius_mount_inner_tunnel_site | bool
     - radius_sites_available_inner_tunnel_src_path | length == 0
 
+- name: Render managed FreeRADIUS dictionary to target host
+  ansible.builtin.template:
+    src: freeradius-dictionary.j2
+    dest: "{{ radius_config_dir }}/dictionary"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  register: radius_dictionary_template
+  when: not (radius_use_full_config_tree | bool)
+
+- name: Render managed custom dictionary files to target host
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ radius_runtime_uid | string }}"
+    group: "{{ radius_runtime_gid | string }}"
+    mode: "0644"
+  loop:
+    - src: freeradius-dictionary-yubikey.j2
+      dest: "{{ radius_config_dir }}/dictionary.d/dictionary.yubikey"
+    - src: freeradius-dictionary-ekinops.j2
+      dest: "{{ radius_config_dir }}/dictionary.d/dictionary.ekinops"
+    - src: freeradius-dictionary-vision.j2
+      dest: "{{ radius_config_dir }}/dictionary.d/dictionary.vision"
+  register: radius_dictionary_custom_templates
+  when: not (radius_use_full_config_tree | bool)
+
 - name: Store RADIUS config change state
   ansible.builtin.set_fact:
     radius_config_changed: >-
@@ -242,4 +269,6 @@
         or (radius_default_site_template.changed | default(false))
         or (radius_inner_tunnel_site_copy.changed | default(false))
         or (radius_inner_tunnel_site_template.changed | default(false))
+        or (radius_dictionary_template.changed | default(false))
+        or (radius_dictionary_custom_templates.changed | default(false))
       }}

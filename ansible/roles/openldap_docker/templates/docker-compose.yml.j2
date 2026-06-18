@@ -119,6 +119,10 @@ services:
 {%   if radius_mount_inner_tunnel_site %}
       - "{{ radius_config_dir }}/sites-enabled/inner-tunnel:{{ radius_container_config_dir }}/sites-enabled/inner-tunnel:ro"
 {%   endif %}
+{%   if radius_enabled | bool %}
+      - "{{ radius_config_dir }}/dictionary:{{ radius_container_config_dir }}/dictionary:ro"
+      - "{{ radius_config_dir }}/dictionary.d:{{ radius_container_config_dir }}/dictionary.d:ro"
+{%   endif %}
 {% endif %}
       - "{{ radius_log_dir }}:{{ radius_container_log_dir }}"
       - "{{ radius_run_dir }}:{{ radius_container_run_dir }}"

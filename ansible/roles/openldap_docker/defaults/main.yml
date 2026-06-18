@@ -100,7 +100,7 @@ ldap_replication_rid: ""
 ldap_replication_type: refreshAndPersist
 ldap_replication_attrs: "*,+"
 ldap_replication_retry: "60 +"
-ldap_replication_timeout: 1
+ldap_replication_timeout: 10
 ldap_replication_schemachecking: "on"
 ldap_replication_tls_reqcert: demand
 ldap_replication_manage_acl: true

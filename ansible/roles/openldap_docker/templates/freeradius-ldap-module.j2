@@ -12,13 +12,17 @@ ldap {
     reply:Tunnel-Type := 'radiusTunnelType'
     reply:Tunnel-Medium-Type := 'radiusTunnelMediumType'
     reply:Tunnel-Private-Group-ID := 'radiusTunnelPrivategroupId'
-    reply:Juniper-Local-User-Name := 'radiusUserCategory'
+    reply:ACL-Auth-Level := 'radiusUserCategory'
     reply:Symbol-Admin-Role := 'hvfoSymbolAdminRole'
     reply:MBG-Management-Privilege-Level := 'hvfoMeinbergManagementPrivilegeLevel'
     reply:CP-Gaia-User-Role := 'hvfoCPGaiaUserRole'
     reply:CP-Gaia-SuperUser-Access := 'hvfoCPGaiaSuperUserAccess'
     reply:Class := 'radiusClass'
     control:YubiKey-Nas-Bypass += 'yubiKeyNasBypass'
+    reply:Radware-Role := 'radiusVSA'
+    reply:Cisco-AVPair := 'radiusAuthType'
+    reply:Ekinops-CLI-Profile := 'hvfoEkinopsCLIProfile'
+    reply:Ekinops-Ekicraft-Profile := 'hvfoEkinopsEkicraftProfile'
   }
 
   user {
