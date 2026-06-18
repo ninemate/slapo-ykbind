@@ -43,6 +43,8 @@
     argv:
       - docker
       - exec
+      - -e
+      - LDAPTLS_REQCERT=never
       - "{{ radius_container_name }}"
       - ldapwhoami
       - -x
