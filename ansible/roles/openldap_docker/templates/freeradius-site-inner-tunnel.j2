@@ -22,7 +22,7 @@ server inner-tunnel {
     ldap
     if ((ok || updated) && &User-Password) {
 {% if radius_yubikey_nas_bypass_enabled | bool %}
-      if ("%{ldap:ldap://{{ radius_ldap_host_effective }}:{{ ldap_container_ldap_port }}/{{ radius_clients_base_dn }}?yubiKeyNasBypass?sub?(|(cn=%{NAS-Identifier})(cn=%{NAS-IP-Address}))}" == "TRUE") {
+      if ("%{ldap:ldap://{{ radius_ldap_host_effective }}:{{ radius_ldap_port_effective }}/{{ radius_clients_base_dn }}?yubiKeyNasBypass?sub?(|(cn=%{NAS-Identifier})(cn=%{NAS-IP-Address}))}" == "TRUE") {
         update control {
           Auth-Type := PAP
           Cleartext-Password := "%{ldap:userPassword}"
