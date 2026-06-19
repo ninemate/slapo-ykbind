@@ -25,7 +25,7 @@ server inner-tunnel {
       if ("%{ldap:ldap://{{ radius_ldap_host_effective }}:{{ radius_ldap_port_effective }}/{{ radius_clients_base_dn }}?yubiKeyNasBypass?sub?(|(cn=%{NAS-Identifier})(cn=%{NAS-IP-Address}))}" == "TRUE") {
         update control {
           Auth-Type := PAP
-          Cleartext-Password := "%{control:Password-With-Header}"
+          Cleartext-Password := "%{ldap.ldap:userPassword}"
         }
       }
       else {
