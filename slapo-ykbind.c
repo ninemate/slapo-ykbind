@@ -582,19 +582,11 @@ ykbind_resolve_ads( void )
 }
 
 static int
-ykbind_silent_modify_response( Operation *op, SlapReply *rs )
-{
-	(void)op;
-	(void)rs;
-	return 0;
-}
-
-static int
 ykbind_state_modify( Operation *op, ykbind_opctx *ctx )
 {
 	Operation op2 = *op;
+	op2.o_msgid = 0;
 	SlapReply rs2 = { REP_RESULT };
-	slap_callback op2_cb = {0};
 	BackendInfo *bi = op2.o_bd->bd_info;
 	Modifications m_use = {0};
 	Modifications m_sess = {0};
@@ -670,8 +662,7 @@ ykbind_state_modify( Operation *op, ykbind_opctx *ctx )
 	m_legacy_ts.sml_next = NULL;
 
 	op2.o_tag = LDAP_REQ_MODIFY;
-	op2_cb.sc_response = ykbind_silent_modify_response;
-	op2.o_callback = &op2_cb;
+	op2.o_callback = NULL;
 	op2.orm_modlist = &m_use;
 	op2.o_req_dn = ctx->req_dn;
 	op2.o_req_ndn = ctx->req_ndn;
