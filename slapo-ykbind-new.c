@@ -133,6 +133,18 @@ static AttributeDescription *ad_yk_last_timestamp;
 static AttributeDescription *ad_yk_legacy_counter;
 static AttributeDescription *ad_yk_legacy_timestamp;
 
+static int ykbind_modhex_decode( const char *input, ber_len_t len, unsigned char *out, ber_len_t out_len );
+static int ykbind_hex_decode( const char *src, size_t src_len, unsigned char *dst, size_t dst_len );
+static void ykbind_hex_encode( const unsigned char *src, size_t len, char *dst );
+static uint16_t ykbind_crc16( const unsigned char *data, size_t len );
+static int ykbind_aes_decrypt( const unsigned char *key, const unsigned char *ciphertext, unsigned char *plaintext );
+static void ykbind_parse_ticket( const unsigned char *plain, ykbind_ticket *ticket );
+static const struct berval *ykbind_first_value( Entry *e, const char **names );
+static int ykbind_parse_modify_timestamp( Entry *e, time_t *out );
+static int ykbind_load_previous_state( Entry *e, unsigned long *use_ctr, unsigned long *session_ctr, unsigned long *timestamp );
+static void ykbind_format_legacy_state( const ykbind_ticket *ticket, char *counter_out, char *timestamp_out );
+static void ykbind_zero_free_cred( struct berval *bv );
+
 static void
 ykbind_set_backend( Operation *op_target, Operation *op, slap_overinst *on )
 {
@@ -1153,11 +1165,11 @@ ykbind_parse_passwd_modify_request(
 
         memset( req, 0, sizeof(*req) );
 
-        if ( op->ore_reqdata.bv_val == NULL || op->ore_reqdata.bv_len == 0 ) {
+        if ( op->ore_reqdata == NULL || op->ore_reqdata->bv_val == NULL || op->ore_reqdata->bv_len == 0 ) {
                 return LDAP_PROTOCOL_ERROR;
         }
 
-        ber_init2( ber, &op->ore_reqdata, LBER_USE_DER );
+        ber_init2( ber, op->ore_reqdata, LBER_USE_DER );
 
         tag = ber_scanf( ber, "{" );
         if ( tag == LBER_ERROR ) {
@@ -1550,7 +1562,11 @@ ykbind_extended_op( Operation *op, SlapReply *rs )
         }
 
         ctx->on = on;
-        ctx->orig_reqdata = op->ore_reqdata;
+        if ( op->ore_reqdata != NULL ) {
+                ctx->orig_reqdata = *op->ore_reqdata;
+        } else {
+                BER_BVZERO( &ctx->orig_reqdata );
+        }
         ctx->new_reqdata = val_result.password;
         ctx->req_ndn = target_ndn;
         ctx->req_dn = target_dn;
@@ -1567,7 +1583,7 @@ ykbind_extended_op( Operation *op, SlapReply *rs )
         cb->sc_cleanup = ykbind_exop_cleanup;
         cb->sc_private = ctx;
         op->o_callback = cb;
-        op->ore_reqdata = ctx->new_reqdata;
+        op->ore_reqdata = &ctx->new_reqdata;
 
         ykbind_entry_release( op, on, e );
         op->o_req_ndn = saved_req_ndn;
@@ -1603,7 +1619,7 @@ ykbind_initialize( void )
         ykbind.on_bi.bi_db_init = ykbind_db_init;
         ykbind.on_bi.bi_db_destroy = ykbind_db_destroy;
         ykbind.on_bi.bi_op_bind = ykbind_simple_bind;
-        ykbind.on_bi.bi_op_extended = ykbind_extended_op;
+        ykbind.on_bi.bi_extended = ykbind_extended_op;
 
         return overlay_register( &ykbind );
 }

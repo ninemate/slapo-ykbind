@@ -1,0 +1,7 @@
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+add: olcAccess
+olcAccess: to attrs=yubiKeyEnabled
+  by dn.exact="cn=admin,dc=example,dc=com" manage
+  by self write
+  by * none
