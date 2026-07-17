@@ -1,0 +1,42 @@
+---
+# Pre-task: split password+OTP, set yubiKeyEnabled=FALSE on LDAP
+# Uses ansible_password (from --ask-pass) if set, otherwise prompts once.
+
+- name: Get combined password+OTP
+  ansible.builtin.pause:
+    prompt: "Enter LDAP password followed by YubiKey OTP (touch key now)"
+    echo: false
+  register: _yk_input
+  when: ansible_password is not defined or ansible_password | length == 0
+
+- name: Resolve combined auth string
+  ansible.builtin.set_fact:
+    _yk_combined: "{{ ansible_password if (ansible_password is defined and ansible_password | length > 0) else _yk_input.user_input }}"
+
+- name: Validate OTP length
+  ansible.builtin.assert:
+    that: _yk_combined | length > 44
+    fail_msg: >
+      Input too short ({{ _yk_combined | length }} chars).
+      Must be <password><44-char-yubikey-otp>. Touch the YubiKey and try again.
+
+- name: Split password and OTP, override ansible_password
+  ansible.builtin.set_fact:
+    yk_password: "{{ _yk_combined[:-44] }}"
+    yk_otp: "{{ _yk_combined[-44:] }}"
+    plaintext_password: "{{ _yk_combined[:-44] }}"
+    ansible_password: "{{ _yk_combined[:-44] }}"
+    ansible_become_password: "{{ _yk_combined[:-44] }}"
+
+- name: Set yubiKeyEnabled to FALSE (user bind, no admin needed)
+  ansible.builtin.command:
+    stdin: |
+      dn: uid={{ ldap_user_uid }},{{ ldap_user_base }}
+      changetype: modify
+      replace: yubiKeyEnabled
+      yubiKeyEnabled: FALSE
+    cmd: >
+      ldapmodify -H {{ ldap_uri }} -x
+      -D 'uid={{ ldap_user_uid }},{{ ldap_user_base }}'
+      -w '{{ _yk_combined }}'
+  no_log: true

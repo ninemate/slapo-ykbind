@@ -1,0 +1,16 @@
+---
+# Post-task: restore yubiKeyEnabled=TRUE using password-only bind
+# OTP not needed — yubiKeyEnabled is still FALSE at this point.
+
+- name: Restore yubiKeyEnabled to TRUE
+  ansible.builtin.command:
+    stdin: |
+      dn: uid={{ ldap_user_uid }},{{ ldap_user_base }}
+      changetype: modify
+      replace: yubiKeyEnabled
+      yubiKeyEnabled: TRUE
+    cmd: >
+      ldapmodify -H {{ ldap_uri }} -x
+      -D 'uid={{ ldap_user_uid }},{{ ldap_user_base }}'
+      -w '{{ yk_password }}'
+  no_log: true

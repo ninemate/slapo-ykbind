@@ -1,0 +1,5 @@
+---
+# YubiKey OTP pre/post role defaults
+ldap_uri: "{{ lookup('env', 'LDAP_URI') | default('ldaps://localhost', true) }}"
+ldap_user_base: "{{ lookup('env', 'LDAP_USER_BASE') | default('ou=people,dc=example,dc=com', true) }}"
+ldap_user_uid: "{{ lookup('env', 'LDAP_USER_UID') | default(ansible_user, true) }}"
